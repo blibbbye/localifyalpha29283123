@@ -1998,9 +1998,9 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     $("#content").innerHTML=`
       <div class="hero">
         <div class="heroCard">
-          <div class="heroKicker">LOCALIFY • Built by @blibbbye + @modmodroots</div>
-          <h1>Local Files<br>But better</h1>
-          <div class="heroDesc">Locailify, A audio player website made by @blibbbye, Create albums and artists add songs from ur files and listen. This was made for me and my friends at ModMod's Unreleased!</div>
+          <div class="heroKicker">LOCALIFY • Made by @blibbbye</div>
+          <h1>Your Music<br>Your Files</h1>
+          <div class="heroDesc">Localify, A local audio player website made by @blibbbye, Create albums and artists add songs with ur own files and enyoy.</div>
           <div class="heroActions"><button class="primary" id="heroAdd">${uiIcon("plus")} Add songs</button><button class="secondary" id="heroFolder">${uiIcon("folder")} Add folder</button><button class="secondary" id="heroAlbum">${uiIcon("plus")} Create album</button><button class="secondary" id="heroArtist">${uiIcon("artist")} Create artist</button></div>
         </div>
         <div class="quickCard">
@@ -2069,7 +2069,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     const mode=normalizeViewMode(state.viewModes?.artists||"large");
     const items=artistList();
     const body=items.length?'<div class="'+catalogModeClass("artists",mode)+'">'+items.map(artistCard).join("")+'</div>':empty("No artists","Create an artist or import music to build your artist index.");
-    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Artists</h2><div class="subtle">Browse and manage every artist in your library.</div></div><div class="sectionHeadActions"><button class="secondary iconOnlyAction" id="artistsTrash" title="Artist cleanup options" aria-label="Artist cleanup options">'+uiIcon("trash")+'</button><button class="primary iconOnlyCreate" id="newArtist" title="Create artist" aria-label="Create artist">'+uiIcon("plus")+'</button>'+viewModeToolbar("artists",mode)+'</div></div>'+body;
+    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Artists</h2><div class="subtle">Idk what to say here, Hi.</div></div><div class="sectionHeadActions"><button class="secondary iconOnlyAction" id="artistsTrash" title="Artist cleanup options" aria-label="Artist cleanup options">'+uiIcon("trash")+'</button><button class="primary iconOnlyCreate" id="newArtist" title="Create artist" aria-label="Create artist">'+uiIcon("plus")+'</button>'+viewModeToolbar("artists",mode)+'</div></div>'+body;
     $("#newArtist").onclick=()=>editArtist(null);
     $("#artistsTrash").onclick=()=>openCatalogCleanup("artists");
     // Use the all-elements selector here. $() returns only one element.
@@ -2101,7 +2101,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     const mode=normalizeViewMode(state.viewModes?.playlists||"large");
     const items=sortCatalogItems("playlists",state.playlists,p=>p.name);
     const body=items.length?localifyPagedHtml(items,playlistCard,"playlists",catalogModeClass("playlists",mode)):empty("Make your first playlist","Create a playlist, then add tracks from the song menus or playlist page.");
-    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Playlists</h2><div class="subtle">Local playlists, saved automatically on this device.</div></div><div class="sectionHeadActions">'+'<button class="primary iconOnlyCreate" id="newPlaylist" title="New playlist" aria-label="New playlist">'+uiIcon("plus")+'</button>'+viewModeToolbar("playlists",mode)+'</div></div>'+body;
+    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Playlists</h2><div class="subtle">Ur local playlist to save songs to.</div></div><div class="sectionHeadActions">'+'<button class="primary iconOnlyCreate" id="newPlaylist" title="New playlist" aria-label="New playlist">'+uiIcon("plus")+'</button>'+viewModeToolbar("playlists",mode)+'</div></div>'+body;
     $("#newPlaylist").onclick=()=>editPlaylist(null);$(".playlist-open").forEach(e=>e.onclick=()=>showPlaylist(e.dataset.id));
   }
   function renderFolders(){
@@ -2157,7 +2157,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
 
   function renderLiked(){
     const tracks=state.liked.map(trackById).filter(Boolean);
-    $("#content").innerHTML=`<div class="profileHero"><div>${collectionArt("liked")}</div><div><h2 class="viewTitle">Liked Songs</h2><div class="subtle">${tracks.length} liked ${tracks.length===1?"song":"songs"}${tracks.length>1?" · Drag songs to reorder":""}</div><div class="entityActions">${tracks.length?`<button class="primary" id="playLiked">${uiIcon("play")} Play</button><button class="secondary" id="shuffleLiked">${uiIcon("shuffle")} Shuffle</button>`:""}</div></div></div>${tracks.length?`<div class="tableWrap">${trackTable(tracks,false,"liked","title",true)}</div>`:empty("Nothing liked yet","Tap the heart beside any song to save it here.")}`;
+    $("#content").innerHTML=`<div class="profileHero"><div>${collectionArt("liked")}</div><div><h2 class="viewTitle">Liked Songs</h2><div class="subtle">${tracks.length} liked ${tracks.length===1?"song":"songs"}${tracks.length>1?" · Press the heart icon next to a song to like it":""}</div><div class="entityActions">${tracks.length?`<button class="primary" id="playLiked">${uiIcon("play")} Play</button><button class="secondary" id="shuffleLiked">${uiIcon("shuffle")} Shuffle</button>`:""}</div></div></div>${tracks.length?`<div class="tableWrap">${trackTable(tracks,false,"liked","title",true)}</div>`:empty("Nothing liked yet","Tap the heart beside any song to save it here.")}`;
     if($("#playLiked"))$("#playLiked").onclick=()=>playQueue(tracks,0);
     if($("#shuffleLiked"))$("#shuffleLiked").onclick=()=>playQueue(shuffleArr(tracks),0);
     bindTrackTable();
@@ -4318,7 +4318,7 @@ function editLocalProfile(){
       const noSongs=artists.filter(a=>!trackArtists.has(a.id));
       const noAlbums=artists.filter(a=>!albumArtists.has(a.id));
       const unknown=artists.filter(a=>/^unknown artist$/i.test(artistDisplayName(a)));
-      setModal('<div class="modalHead"><div><h2>Manage artists</h2><div class="help">These actions only affect artists. Songs and albums are kept.</div></div><button class="circle iconOnly" id="closeCatalogCleanup">'+uiIcon("close")+'</button></div><div class="catalogCleanupGroup"><h3>Delete artists</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteArtistsNoSongs">Without songs ('+noSongs.length+')</button><button class="secondary small" id="deleteArtistsNoAlbums">Without albums ('+noAlbums.length+')</button><button class="secondary small" id="deleteUnknownArtists">Unknown Artist ('+unknown.length+')</button><button class="dangerBtn small" id="deleteAllArtists">All artists ('+artists.length+')</button></div></div>',{large:true});
+      setModal('<div class="modalHead"><div><h2>Manage artists</h2><div class="help">rn theres only "Delete artists" but maybe will be more.</div></div><button class="circle iconOnly" id="closeCatalogCleanup">'+uiIcon("close")+'</button></div><div class="catalogCleanupGroup"><h3>Delete artists</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteArtistsNoSongs">Without songs ('+noSongs.length+')</button><button class="secondary small" id="deleteArtistsNoAlbums">Without albums ('+noAlbums.length+')</button><button class="secondary small" id="deleteUnknownArtists">Unknown Artist ('+unknown.length+')</button><button class="dangerBtn small" id="deleteAllArtists">All artists ('+artists.length+')</button></div></div>',{large:true});
       $("#closeCatalogCleanup").onclick=()=>closeModal(true);
       $("#deleteArtistsNoSongs").onclick=()=>deleteArtistIds(noSongs.map(a=>a.id),"artists without songs");
       $("#deleteArtistsNoAlbums").onclick=()=>deleteArtistIds(noAlbums.map(a=>a.id),"artists without albums");
@@ -4327,7 +4327,7 @@ function editLocalProfile(){
       return;
     }
     const albums=albumList(),emptyAlbums=albums.filter(a=>(__localifyCatalog().byAlbum.get(a.id)||[]).length===0);
-    setModal('<div class="modalHead"><div><h2>Manage albums</h2><div class="help">These actions only affect albums. Songs are kept in your library.</div></div><button class="circle iconOnly" id="closeCatalogCleanup">'+uiIcon("close")+'</button></div><div class="catalogCleanupGroup"><h3>Delete albums</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteEmptyAlbums">Without songs ('+emptyAlbums.length+')</button><button class="dangerBtn small" id="deleteAllAlbums">All albums ('+albums.length+')</button></div></div>',{large:true});
+    setModal('<div class="modalHead"><div><h2>Manage albums</h2><div class="help">same here (read artists delete things)</div></div><button class="circle iconOnly" id="closeCatalogCleanup">'+uiIcon("close")+'</button></div><div class="catalogCleanupGroup"><h3>Delete albums</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteEmptyAlbums">Without songs ('+emptyAlbums.length+')</button><button class="dangerBtn small" id="deleteAllAlbums">All albums ('+albums.length+')</button></div></div>',{large:true});
     $("#closeCatalogCleanup").onclick=()=>closeModal(true);
     $("#deleteEmptyAlbums").onclick=()=>cleanupAlbums(emptyAlbums.map(a=>a.id),"albums without songs");
     $("#deleteAllAlbums").onclick=()=>cleanupAlbums(albums.map(a=>a.id),"albums");
@@ -5771,9 +5771,9 @@ function openPresetsMenu(){
     const html =
       "<div class=\"modalHead\"><h2>Presets</h2><button class=\"circle iconOnly\" id=\"closeModal\" title=\"Close\" aria-label=\"Close\">"+uiIcon("close")+"</button></div>"+
       "<div class=\"presetHome\">"+
-        "<div class=\"presetHero\"><div class=\"presetHeroTop\"><div><h3>Portable Localify presets</h3><p>Save and share your Localify library as <code>.localify</code> files. Audio is included in the package, and large exports use ZIP64 and streaming when your browser supports it.</p></div><div class=\"presetHeroIcon\">"+uiIcon("save")+"</div></div></div>"+
+        "<div class=\"presetHero\"><div class=\"presetHeroTop\"><div><h3>Portable Localify presets</h3><p>Save your Localify library as <code>.localify</code> files. It is 1 file and is easy to transport to other devices.</p></div><div class=\"presetHeroIcon\">"+uiIcon("save")+"</div></div></div>"+
         "<div class=\"presetActionGrid\">"+
-          "<button class=\"presetAction\" id=\"presetExportBtn\"><span class=\"presetActionIcon\">"+uiIcon("download")+"</span><span><strong>Export preset</strong><span>Back up or share your library</span></span></button>"+
+          "<button class=\"presetAction\" id=\"presetExportBtn\"><span class=\"presetActionIcon\">"+uiIcon("download")+"</span><span><strong>Export preset</strong><span>Export ur library into a preset</span></span></button>"+
           "<button class=\"presetAction\" id=\"presetImportBtn\"><span class=\"presetActionIcon\">"+uiIcon("upload")+"</span><span><strong>Import preset</strong><span>Load a Localify file onto this device</span></span></button>"+
         "</div>"+
         "<div class=\"presetQuickTitle\">Quick tools</div>"+
