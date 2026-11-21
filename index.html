@@ -1082,7 +1082,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
   async function chooseTheme(id){
     if(!allLocalifyThemes().some(t=>t.id===id))return;
     state.settings.theme=id;applyTheme();await save();
-    $$$(".themeChoice").forEach(b=>b.classList.toggle("active",b.dataset.theme===id));
+    $(".themeChoice").forEach(b=>b.classList.toggle("active",b.dataset.theme===id));
   }
 
   let queueBase=[];
@@ -2033,7 +2033,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     $$('[data-search-filter]').forEach(b=>b.onclick=()=>{state.searchFilter=b.dataset.searchFilter;renderSearch()});
     if(state.searchFilter==="songs"||state.searchFilter==="all")bindTrackTable();
     bindAlbumCards();
-    $$$(".artist-open").forEach(e=>e.onclick=()=>showArtist(e.dataset.id));
+    $(".artist-open").forEach(e=>e.onclick=()=>showArtist(e.dataset.id));
   }
   function searchResultsHtml(ft,fa,fr){
     const sections=[];
@@ -2102,7 +2102,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     const items=sortCatalogItems("playlists",state.playlists,p=>p.name);
     const body=items.length?localifyPagedHtml(items,playlistCard,"playlists",catalogModeClass("playlists",mode)):empty("Make your first playlist","Create a playlist, then add tracks from the song menus or playlist page.");
     $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Playlists</h2><div class="subtle">Local playlists, saved automatically on this device.</div></div><div class="sectionHeadActions">'+'<button class="primary iconOnlyCreate" id="newPlaylist" title="New playlist" aria-label="New playlist">'+uiIcon("plus")+'</button>'+viewModeToolbar("playlists",mode)+'</div></div>'+body;
-    $("#newPlaylist").onclick=()=>editPlaylist(null);$$$(".playlist-open").forEach(e=>e.onclick=()=>showPlaylist(e.dataset.id));
+    $("#newPlaylist").onclick=()=>editPlaylist(null);$(".playlist-open").forEach(e=>e.onclick=()=>showPlaylist(e.dataset.id));
   }
   function renderFolders(){
     const folders=sortCatalogItems("folders",state.folders||[],f=>f.name);
