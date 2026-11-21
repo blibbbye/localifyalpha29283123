@@ -926,7 +926,7 @@ body.theme-gradient .btn:not(.primary),body.theme-gradient .pill,body.theme-grad
 body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-input)!important}
 </style>
 </style>
-</head>
+<style id="artist-catalog-management-css">.artist-select-check{position:absolute;right:9px;bottom:9px;width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:var(--panel2,#171b21);border:1px solid var(--line,#343a44);cursor:pointer;z-index:2}.artist-select-check input{position:absolute;opacity:0;width:1px;height:1px}.artist-select-check span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;font-weight:900;color:transparent}.artist-select-check:has(input:checked){background:var(--accent);border-color:var(--accent)}.artist-select-check:has(input:checked) span{color:#071018}.catalogCleanupGroup{padding:12px;border:1px solid var(--line);border-radius:12px;margin:10px 0}.catalogCleanupGroup h3{margin:0 0 7px;font-size:14px}.catalogCleanupActions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}</style></head>
 <body>
 <div class="app">
   <aside>
@@ -2058,8 +2058,12 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
     const mode=normalizeViewMode(state.viewModes?.artists||"large");
     const items=artistList();
     const body=items.length?'<div class="'+catalogModeClass("artists",mode)+'">'+items.map(artistCard).join("")+'</div>':empty("No artists","Create an artist or import music to build your artist index.");
-    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Artists</h2><div class="subtle">Artists have their own profile, songs and albums u can add!</div></div><div class="sectionHeadActions">'+'<button class="primary iconOnlyCreate" id="newArtist" title="Create artist" aria-label="Create artist">'+uiIcon("plus")+'</button>'+viewModeToolbar("artists",mode)+'</div></div>'+body;
-    $("#newArtist").onclick=()=>editArtist(null);$("#.artist-open").forEach(e=>e.onclick=()=>showArtist(e.dataset.id));
+    $("#content").innerHTML='<div class="sectionHead"><div><h2 class="viewTitle">Artists</h2><div class="subtle">Browse and manage every artist in your library.</div></div><div class="sectionHeadActions"><button class="secondary iconOnlyAction" id="artistManage" title="Manage / delete artists and albums" aria-label="Manage artists and albums">'+uiIcon("trash")+'</button><button class="primary iconOnlyCreate" id="newArtist" title="Create artist" aria-label="Create artist">'+uiIcon("plus")+'</button>'+viewModeToolbar("artists",mode)+'</div></div>'+body;
+    $("#newArtist").onclick=()=>editArtist(null);
+    $(".artist-open").forEach(e=>e.onclick=ev=>{if(ev.target.closest(".artist-select-check"))return;showArtist(e.dataset.id)});
+    $("#artistManage").onclick=openCatalogCleanup;
+    $(".artist-select-check input").forEach(input=>input.onchange=()=>{state.selectedArtists=state.selectedArtists||[];const id=input.dataset.artistSelect;if(input.checked){if(!state.selectedArtists.includes(id))state.selectedArtists.push(id)}else state.selectedArtists=state.selectedArtists.filter(x=>x!==id);renderArtists()});
+    if(state.selectedArtists&&state.selectedArtists.length){const bar=document.createElement("div");bar.className="selectionBar";bar.style.marginBottom="14px";bar.innerHTML='<strong>'+state.selectedArtists.length+' selected</strong><button class="secondary small" id="artistBulkEdit">Bulk edit</button><button class="dangerBtn small" id="artistBulkDelete">Delete</button><button class="secondary small" id="artistBulkClear">Clear</button>';$("#content").insertBefore(bar,$("#content").children[1]||null);$("#artistBulkEdit").onclick=()=>bulkEditArtists(state.selectedArtists);$("#artistBulkDelete").onclick=()=>deleteArtistIds(state.selectedArtists,"selected artists");$("#artistBulkClear").onclick=()=>{state.selectedArtists=[];renderArtists()}}
   }
   function renderPlaylists(){
     const mode=normalizeViewMode(state.viewModes?.playlists||"large");
@@ -2138,7 +2142,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
   function albumCard(a){const tracks=__localifyCatalog().byAlbum.get(a.id)||[];const cover=coverForAlbum(a,a.cover);return `<div class="card album-open" data-id="${a.id}" style="cursor:pointer">${cover?`<div class="art"><img class="localifyCoverImage" src="${esc(cover)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>`:`<div class="art"><div class="fallback">${uiIcon("album")}</div></div>`}<div class="cardTitle">${esc(a.title)}</div><div class="cardSub">${artistLinksForAlbumHtml(a)} • ${tracks.length} songs • ${durationLabel(tracks)}</div></div>`}
   function bindAlbumCards(){$$(".album-open").forEach(e=>e.onclick=()=>showAlbum(e.dataset.id))}
 
-  function artistCard(a){const count=(__localifyCatalog().byArtist.get(a.id)||[]).length;return `<div class="card artist-open" data-id="${a.id}" style="cursor:pointer">${a.image?`<div class="art" style="border-radius:50%"><img class="localifyCoverImage" src="${esc(a.image)}" alt=""></div>`:`<div class="art artistFallback" style="border-radius:50%">${fallbackArt("artist")}</div>`}<div class="cardTitle">${esc(a.name)}</div><div class="cardSub">${count} songs</div></div>`}
+  function artistCard(a){const count=(__localifyCatalog().byArtist.get(a.id)||[]).length;const selected=(state.selectedArtists||[]).includes(a.id);return `<div class="card artist-open" data-id="${esc(a.id)}" style="cursor:pointer;position:relative">${a.image?`<div class="art" style="border-radius:50%"><img class="localifyCoverImage" src="${esc(a.image)}" alt=""></div>`:`<div class="art artistFallback" style="border-radius:50%">${fallbackArt("artist")}</div>`}<div class="cardTitle">${esc(artistDisplayName(a))}</div><div class="cardSub">${count} songs</div><label class="artist-select-check" title="Select artist"><input type="checkbox" data-artist-select="${esc(a.id)}" ${selected?"checked":""}><span>✓</span></label></div>`}
   function playlistCard(p){return `<div class="card playlist-open" data-id="${p.id}" style="cursor:pointer">${p.cover?`<div class="art"><img class="localifyCoverImage" src="${esc(p.cover)}" alt=""></div>`:`<div class="art"><div class="fallback">${uiIcon("playlist")}</div></div>`}<div class="cardTitle">${esc(p.name)}</div><div class="cardSub">${p.trackIds.length} songs • ${durationLabel(p.trackIds.map(trackById).filter(Boolean))}</div></div>`}
 
   function trackTableScope(){
@@ -4242,6 +4246,48 @@ function editLocalProfile(){
       await save();state.selected=[];closeModal(true);renderCurrentViewWithoutScroll();toast("Bulk changes applied.");
     };
   }
+
+  function deleteArtistIds(ids,label="artists"){
+    const list=[...new Set(ids||[])].map(artistById).filter(Boolean);if(!list.length){toast("No matching artists to delete.");return}
+    if(!confirm("Are you sure this will delete "+list.length+" "+label+"? Songs and albums will remain, but their artist links will be cleared."))return;
+    const remove=new Set(list.map(a=>a.id));state.artists=state.artists.filter(a=>!remove.has(a.id));
+    for(const a of state.albums)applyArtistIds(a,artistIdsForAlbum(a).filter(id=>!remove.has(id)));
+    for(const t of state.tracks){const ids=artistIdsForTrack(t).filter(id=>!remove.has(id));applyArtistIds(t,ids);t.artist=namesOfIds(ids).join(", ")||NONE_LABEL;const aa=idsOf(t,"albumArtistIds","albumArtistId").filter(id=>!remove.has(id));applyAlbumArtistIds(t,aa);t.albumArtist=namesOfIds(aa).join(", ")||NONE_LABEL}
+    state.selectedArtists=[];save(true).then(()=>{closeModal(true);setView("artists");toast("Deleted "+list.length+" artists.")});
+  }
+  function cleanupAlbums(ids,label){
+    const list=[...new Set(ids||[])].map(albumById).filter(Boolean);if(!list.length){toast("No matching albums to delete.");return}
+    if(!confirm("Are you sure this will delete "+list.length+" "+label+"? Songs will stay in your library, but will no longer belong to these albums."))return;
+    const remove=new Set(list.map(a=>a.id));state.albums=state.albums.filter(a=>!remove.has(a.id));
+    for(const t of state.tracks)if(remove.has(t.albumId)){t.albumId=null;t.album=NONE_LABEL;t.albumArtistIds=[];t.albumArtistId=null;t.albumArtist=NONE_LABEL}
+    for(const folder of state.folders||[])folder.items=(folder.items||[]).filter(item=>!(item?.type==="album"&&remove.has(item.id)));
+    save(true).then(()=>{closeModal(true);setView("albums");toast("Deleted "+list.length+" albums. Songs were kept.")});
+  }
+  function bulkEditArtists(ids){
+    const artists=[...new Set(ids||[])].map(artistById).filter(Boolean);if(!artists.length)return;
+    setModal('<div class="modalHead"><h2>Bulk edit '+artists.length+' artists</h2><button class="circle iconOnly" id="closeArtistBulk">×</button></div><div class="help">Only filled fields are applied to every selected artist.</div><div class="formGrid"><div class="field full"><label>Set label</label><input id="artistBulkLabel"></div><div class="field full"><label>Set website</label><input id="artistBulkWebsite"></div><div class="field full"><label>Set active year</label><input id="artistBulkYear"></div><div class="field full"><label>Set genres (comma separated)</label><input id="artistBulkGenres"></div><div class="field full"><label>Set bio</label><textarea id="artistBulkBio"></textarea></div><div class="field full"><label>Apply same profile picture</label><button class="secondary" id="artistBulkImage">Choose image</button><span id="artistBulkImageState" class="help">No image selected</span></div></div><div class="modalFoot"><button class="secondary" id="artistBulkCancel">Cancel</button><button class="primary" id="artistBulkApply">Apply to '+artists.length+' artists</button></div>',{large:true});
+    let image=null;$("#closeArtistBulk").onclick=()=>closeModal();$("#artistBulkCancel").onclick=()=>closeModal();
+    $("#artistBulkImage").onclick=()=>imagePicker(null,data=>{image=data;$("#artistBulkImageState").textContent=data?"Image selected":"No image selected"});
+    $("#artistBulkApply").onclick=async()=>{const label=$("#artistBulkLabel").value.trim(),website=$("#artistBulkWebsite").value.trim(),year=$("#artistBulkYear").value.trim(),genres=$("#artistBulkGenres").value.trim(),bio=$("#artistBulkBio").value.trim();for(const a of artists){if(label)a.label=label;if(website)a.website=website;if(year)a.year=year;if(genres)a.genres=genres.split(",").map(x=>x.trim()).filter(Boolean);if(bio)a.bio=bio;if(image!==null)a.image=image}state.selectedArtists=[];await save();closeModal(true);renderArtists();toast("Artist changes applied.")};
+  }
+  function openCatalogCleanup(){
+    const artists=artistList(),albums=albumList(),trackArtists=new Set(),albumArtists=new Set();
+    for(const t of state.tracks)for(const id of artistIdsForTrack(t))trackArtists.add(id);
+    for(const a of state.albums)for(const id of artistIdsForAlbum(a))albumArtists.add(id);
+    const noSongs=artists.filter(a=>!trackArtists.has(a.id)),noAlbums=artists.filter(a=>!albumArtists.has(a.id)),unknown=artists.filter(a=>/^unknown artist$/i.test(artistDisplayName(a)));
+    const emptyAlbums=albums.filter(a=>(__localifyCatalog().byAlbum.get(a.id)||[]).length===0);
+    setModal('<div class="modalHead"><div><h2>Manage artists & albums</h2><div class="help">Remove unused or placeholder entries.</div></div><button class="circle iconOnly" id="closeCatalogCleanup">×</button></div><section class="catalogCleanupGroup"><h3>Artists</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteArtistsNoSongs">Without songs ('+noSongs.length+')</button><button class="secondary small" id="deleteArtistsNoAlbums">Without albums ('+noAlbums.length+')</button><button class="secondary small" id="deleteUnknownArtists">Unknown Artist ('+unknown.length+')</button><button class="dangerBtn small" id="deleteAllArtists">All artists ('+artists.length+')</button></div><div class="help">Songs and albums stay; only artist links are removed.</div></section><section class="catalogCleanupGroup"><h3>Albums</h3><div class="catalogCleanupActions"><button class="secondary small" id="deleteEmptyAlbums">Without songs ('+emptyAlbums.length+')</button><button class="dangerBtn small" id="deleteAllAlbums">All albums ('+albums.length+')</button></div><div class="help">Songs stay in your library and are detached from deleted albums.</div></section><section class="catalogCleanupGroup"><h3>Select all</h3><div class="catalogCleanupActions"><button class="secondary small" id="selectAllArtists">Select all artists</button><button class="secondary small" id="showAllAlbums">Show all albums</button></div></section>',{large:true});
+    $("#closeCatalogCleanup").onclick=()=>closeModal(true);
+    $("#deleteArtistsNoSongs").onclick=()=>deleteArtistIds(noSongs.map(a=>a.id),"artists without songs");
+    $("#deleteArtistsNoAlbums").onclick=()=>deleteArtistIds(noAlbums.map(a=>a.id),"artists without albums");
+    $("#deleteUnknownArtists").onclick=()=>deleteArtistIds(unknown.map(a=>a.id),"Unknown Artist entries");
+    $("#deleteAllArtists").onclick=()=>deleteArtistIds(artists.map(a=>a.id),"artists");
+    $("#deleteEmptyAlbums").onclick=()=>cleanupAlbums(emptyAlbums.map(a=>a.id),"albums without songs");
+    $("#deleteAllAlbums").onclick=()=>cleanupAlbums(albums.map(a=>a.id),"albums");
+    $("#selectAllArtists").onclick=()=>{state.selectedArtists=artists.map(a=>a.id);closeModal(true);renderArtists()};
+    $("#showAllAlbums").onclick=()=>{closeModal(true);setView("albums")};
+  }
+
   function bulkPlay(tracks){playQueue(tracks.filter(t=>state.selected.includes(t.id)),0)}
   function bulkAddPlaylist(ids){
     const tracks=ids.map(trackById).filter(Boolean);if(!tracks.length)return;
