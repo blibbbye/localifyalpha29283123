@@ -4906,7 +4906,7 @@ async function renderSongWithEffectsWav(blob,eq){
     let cdStart=cdOffset,central=new Uint8Array(await file.slice(cdStart,Math.min(file.size,cdStart+cdSize)).arrayBuffer());
     const sigAt=buf=>{for(let i=0;i+4<=buf.length;i++)if(buf[i]===0x50&&buf[i+1]===0x4b&&buf[i+2]===0x01&&buf[i+3]===0x02)return i;return -1};
     if(sigAt(central)!==0){const ws=Math.max(0,cdOffset-1048576),we=Math.min(file.size,cdOffset+cdSize+1048576),win=new Uint8Array(await file.slice(ws,we).arrayBuffer()),found=sigAt(win);if(found<0)throw Error('Could not find the preset file list. This ZIP may use an unsupported or damaged format.');cdStart=ws+found;central=win.slice(found)}
-    const dv=new DataView(central.buffer,central.byteOffset,central.byteLength),dec=new TextDecoder(),files=new Map();let pos=0,read=0;
+    const dv=new DataView(central.buffer,central.byteOffset,central.byteLength),dec=new TextDecoder(),files=new Map();let pos=0,read=0,skippedAudio=0;
     const readZip64=(extra,needs)=>{let q=0,vals={usize:null,csize:null,offset:null};while(q+4<=extra.length){const id=extra[q]|(extra[q+1]<<8),len=extra[q+2]|(extra[q+3]<<8),start=q+4,end=start+len;if(end>extra.length)break;if(id===1){let at=start;for(const key of needs){if(at+8>end)break;const x=new DataView(extra.buffer,extra.byteOffset+at,8);vals[key]=x.getUint32(0,true)+x.getUint32(4,true)*4294967296;at+=8}break}q=end}return vals};
     while(read<count&&pos+46<=central.length&&dv.getUint32(pos,true)===0x02014b50){
       const method=dv.getUint16(pos+10,true),crc=dv.getUint32(pos+16,true),c32=dv.getUint32(pos+20,true),u32v=dv.getUint32(pos+24,true),nameLen=dv.getUint16(pos+28,true),extraLen=dv.getUint16(pos+30,true),commentLen=dv.getUint16(pos+32,true),off32=dv.getUint32(pos+42,true),end=pos+46+nameLen+extraLen+commentLen;
@@ -4915,13 +4915,15 @@ async function renderSongWithEffectsWav(blob,eq){
       if(u32v===0xffffffff)needs.push('usize');if(c32===0xffffffff)needs.push('csize');if(off32===0xffffffff)needs.push('offset');
       const z=readZip64(extra,needs),usize=u32v===0xffffffff?z.usize:u32v,csize=c32===0xffffffff?z.csize:c32,rawOffset=off32===0xffffffff?z.offset:off32;
       if(usize==null||csize==null||rawOffset==null||!Number.isSafeInteger(usize)||!Number.isSafeInteger(csize)||!Number.isSafeInteger(rawOffset))throw Error('Invalid ZIP64 entry: '+name);
-      const localOffset=rawOffset+(cdStart-cdOffset);if(localOffset<0||localOffset+30>file.size)throw Error('The preset contains an invalid file location: '+name);
-      const lh=new Uint8Array(await file.slice(localOffset,localOffset+30).arrayBuffer());if(lh.length<30||new DataView(lh.buffer).getUint32(0,true)!==0x04034b50)throw Error('Could not read preset file: '+name+'. Try exporting it again with a newer Localify version.');
+      const localOffset=rawOffset+(cdStart-cdOffset),isAudio=name.startsWith('audio/');
+      if(localOffset<0||localOffset+30>file.size){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('The preset contains an invalid file location: '+name)}
+      const lh=new Uint8Array(await file.slice(localOffset,localOffset+30).arrayBuffer());if(lh.length<30||new DataView(lh.buffer).getUint32(0,true)!==0x04034b50){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('Could not read preset file: '+name+'. Try exporting it again with a newer Localify version.')}
       const lv=new DataView(lh.buffer),dataStart=localOffset+30+lv.getUint16(26,true)+lv.getUint16(28,true);
-      if(dataStart+csize>file.size)throw Error('Preset file data is incomplete: '+name);if(files.has(name))throw Error('The preset contains duplicate files: '+name);
+      if(dataStart+csize>file.size){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('Preset file data is incomplete: '+name)}if(files.has(name))throw Error('The preset contains duplicate files: '+name);
       files.set(name,{blob:file.slice(dataStart,dataStart+csize),method,size:usize,crc:crc>>>0});pos=end;read++;
     }
     if(!files.has('library.json'))throw Error('This ZIP does not contain a Localify preset manifest (library.json).');
+    files.skippedAudioEntries=skippedAudio;
     return files;
   }
   async function zipEntryBytes(entry){
@@ -5490,7 +5492,7 @@ async function renderSongWithEffectsWav(blob,eq){
     await save(false);await flushSave(false);
     const persisted=true;
     render();renderPlayer();
-    toast(presetLabel(kind)+' preset '+(mode==='set'?'set':'added')+'.')
+    toast(presetLabel(kind)+' preset '+(mode==='set'?'set':'added')+'.'+(files?.skippedAudioEntries?' '+files.skippedAudioEntries+' damaged audio file(s) were skipped; the song details were kept.':''))
   }catch(e){Object.assign(state,rollback);pendingBlobIds=new Set(oldPendingIds);pendingBlobDeletes=new Set(oldPendingDeletes);dirtySave=true;try{await save(false);await flushSave(false)}catch(restoreError){console.error('Localify preset rollback save failed',restoreError)}console.error('Localify backup import failed',e);toast('Import failed. Your previous Localify library was restored. '+(e?.message||''))}}
   function publicShareCover(v){const s=typeof v==="string"?v:"";return /^(https?:\/\/)/i.test(s)?s:""}
 function buildPresetSharePayload(source=null){
