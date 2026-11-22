@@ -960,6 +960,7 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
       <input type="file" id="filePicker" accept="audio/*,.mp3,.m4a,.mp4,.aac,.flac,.wav,.ogg,.oga,.opus,.webm,.aiff,.aif,.alac,.caf" multiple hidden>
       <input type="file" id="directoryPicker" webkitdirectory directory mozdirectory multiple hidden accept="audio/*,.mp3,.m4a,.mp4,.aac,.flac,.wav,.ogg,.oga,.opus,.webm,.aiff,.aif,.alac,.caf,image/*">
       <input type="file" id="bundlePicker" accept="*/*" hidden>
+      <input type="file" id="recoverPresetPicker" accept=".localify,.zip,application/octet-stream,application/zip" hidden>
       <input type="file" id="coverPicker" accept="image/*" hidden>
     </div>
   </aside>
@@ -5386,6 +5387,40 @@ async function renderSongWithEffectsWav(blob,eq){
     }
     return {p,files};
   }
+  async function recoverPresetLocally(file){
+    if(!file)throw new Error('No preset file was selected.');
+    if(!file.size)throw new Error('The preset file is empty.');
+    let files=null,manifest=null,zipError=null;
+    try{
+      files=await parseZip(file);
+      const entry=files.get('library.json')||[...files.entries()].find(([name])=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')?.[1];
+      if(entry)manifest=JSON.parse(new TextDecoder().decode(await zipEntryBytes(entry)));
+    }catch(e){zipError=e}
+    if(!manifest){
+      const head=new Uint8Array(await file.slice(0,30).arrayBuffer());
+      if(head.length>=30&&new DataView(head.buffer).getUint32(0,true)===0x04034b50){
+        const h=new DataView(head.buffer),flags=h.getUint16(6,true),method=h.getUint16(8,true),crc=h.getUint32(14,true),csize=h.getUint32(18,true),usize=h.getUint32(22,true),nl=h.getUint16(26,true),el=h.getUint16(28,true);
+        const name=new TextDecoder().decode(await file.slice(30,30+nl).arrayBuffer()).replace(/\\\\/g,'/'),start=30+nl+el;
+        if(name.split('/').pop()==='library.json'&&!(flags&8)&&csize>0&&start+csize<=file.size){
+          manifest=JSON.parse(new TextDecoder().decode(await zipEntryBytes({blob:file.slice(start,start+csize),method,size:usize,crc:crc>>>0})));
+        }
+      }
+    }
+    if(!manifest||typeof manifest!=='object'||Array.isArray(manifest))throw new Error('Could not recover library.json. The export may have crashed before saving its library data.'+(zipError?' '+(zipError.message||''):''));
+    if(!Array.isArray(manifest.tracks)&&Array.isArray(manifest.songs))manifest.tracks=manifest.songs;
+    const tracks=Array.isArray(manifest.tracks)?manifest.tracks:[];
+    let available=0,missing=0;
+    for(const track of tracks){if(!track?.audioFile)continue;if(files?.has(track.audioFile))available++;else missing++}
+    const report={recoveredAt:new Date().toISOString(),sourceFile:file.name,sourceSize:file.size,presetName:manifest.presetName||'Recovered Localify preset',presetKind:manifest.presetKind||'unknown',artists:Array.isArray(manifest.artists)?manifest.artists.length:0,albums:Array.isArray(manifest.albums)?manifest.albums.length:0,playlists:Array.isArray(manifest.playlists)?manifest.playlists.length:0,songs:tracks.length,audioFilesFound:available,audioFilesMissing:missing,manifest};
+    const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Localify-recovery-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    setModal('<div class="modalHead"><h2>Preset recovery check</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">'+uiIcon('close')+'</button></div><div class="creditsBox" style="margin-top:0"><strong>'+esc(report.presetName)+'</strong><div class="subtle">Your current Localify library was not changed.</div></div><div class="help" style="margin-top:12px">Recovered library information:</div><div class="creditsBox"><strong>'+report.songs+' songs · '+report.artists+' artists · '+report.albums+' albums · '+report.playlists+' playlists</strong><div class="subtle">'+available+' audio files found · '+missing+' missing or unreadable</div></div><div class="help">A recovery report with the readable library data was saved to your Downloads folder. Keep the original preset unchanged.</div>');
+    $('#closeModal').onclick=()=>closeModal(true);toast('Recovery check finished. Your library was not changed.');
+  }
+  function openPresetRecovery(){
+    const input=$('#recoverPresetPicker');if(!input){toast('Preset recovery is unavailable.');return}
+    input.value='';input.onchange=async()=>{const file=input.files?.[0];if(!file)return;try{await recoverPresetLocally(file)}catch(e){console.error(e);toast(e?.message||'Could not recover this preset.')}finally{input.value=''}};
+    input.click();
+  }
   function openPresetImportMode(p,files){pendingPresetImport={p,files};const kind=presetLabel(p.presetKind),setText=({full:'Replace your entire Localify library.',artists:'Delete every artist and replace the artist list with this file.',albums:'Delete every album and replace the album list with this file.',songs:'Delete every song and replace the song list with this file.',playlists:'Delete every playlist and replace the playlist list with this file.',liked:'Replace your liked songs list with this file.',recent:'Replace your recently played list with this file.',settings:'Replace your Localify settings with this file.'})[p.presetKind]||'Replace the data represented by this file.',summary=(p.presetKind==='full'?[['artists',p.artists?.length||0],['albums',p.albums?.length||0],['folders',p.folders?.length||0],['playlists',p.playlists?.length||0]]:[['artists',p.artists?.length||0],['albums',p.albums?.length||0],['folders',p.folders?.length||0],['playlists',p.playlists?.length||0],['songs',p.tracks?.length||0]]).filter(x=>x[1]).map(x=>`${x[1]} ${x[0]}`).join(' • ')||'Settings preset';setModal(`<div class="modalHead"><h2>Import ${esc(kind)}</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">${uiIcon('close')}</button></div><div class="creditsBox" style="margin-top:0"><strong>${esc(p.presetName||kind)}</strong><div class="subtle">${esc(summary)}</div></div><div class="help" style="margin-top:12px">Choose how to import this Localify file.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px"><button class="primary" id="presetAdd">Add file</button><button class="dangerBtn" id="presetSet">Set file</button></div>`);$('#closeModal').onclick=()=>{pendingPresetImport=null;closeModal(true)};$('#presetAdd').onclick=async()=>{const x=pendingPresetImport;pendingPresetImport=null;closeModal(true);await importPresetData(x.p,x.files,'add')};$('#presetSet').onclick=async()=>{const x=pendingPresetImport;pendingPresetImport=null;closeModal(true);if(confirm(`Set ${kind}? This will replace the existing ${kind.toLowerCase()} data in Localify.`))await importPresetData(x.p,x.files,'set')}}
   async function importPresetFile(file,expectedKind=''){try{const x=await readPresetFile(file);if(expectedKind&&x.p.presetKind!==expectedKind)throw Error(`This file is not an ${presetLabel(expectedKind)} preset.`);openPresetImportMode(x.p,x.files)}catch(e){console.error(e);toast(e?.message||'Could not read that Localify backup.')}finally{pendingExpectedPresetKind='';$('#bundlePicker').value=''}}
   function findArtistImport(a){return state.artists.find(x=>presetKey(x.name)===presetKey(a.name))||null}
@@ -5787,6 +5822,7 @@ function openPresetsMenu(){
         "<div class=\"presetActionGrid\">"+
           "<button class=\"presetAction\" id=\"presetExportBtn\"><span class=\"presetActionIcon\">"+uiIcon("download")+"</span><span><strong>Export preset</strong><span>Export ur library into a preset</span></span></button>"+
           "<button class=\"presetAction\" id=\"presetImportBtn\"><span class=\"presetActionIcon\">"+uiIcon("upload")+"</span><span><strong>Import preset</strong><span>Load a Localify file onto this device</span></span></button>"+
+          "<button class=\"presetAction\" id=\"presetRecoverBtn\"><span class=\"presetActionIcon\">"+uiIcon("refresh-cw")+"</span><span><strong>Recover broken preset</strong><span>Check a preset export that crashed</span></span></button>"+
         "</div>"+
         "<div class=\"presetQuickTitle\">Quick tools</div>"+
         "<div class=\"presetQuickGrid\">"+
@@ -5800,6 +5836,7 @@ function openPresetsMenu(){
     $("#closeModal").onclick=()=>closeModal(true);
     $("#presetExportBtn").onclick=()=>{closeModal(true);openPresetExportChooser()};
     $("#presetImportBtn").onclick=()=>{closeModal(true);pickPresetFile()};
+    $("#presetRecoverBtn").onclick=()=>{closeModal(true);openPresetRecovery()};
     $("#presetExportArtistsBtn").onclick=()=>{closeModal(true);openPresetExportSelection("artists")};
     $("#presetImportArtistsBtn").onclick=()=>{closeModal(true);pickPresetFile("artists")};
     $("#presetExportAlbumsBtn").onclick=()=>{closeModal(true);openPresetExportSelection("albums")};
