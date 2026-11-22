@@ -4889,48 +4889,39 @@ async function renderSongWithEffectsWav(blob,eq){
   async function makeZip(entries){const chunks=[],central=[];let offset=0;const enc=new TextEncoder();for(const entry of entries){const nb=enc.encode(entry.name),data=entry.bytes instanceof Uint8Array?entry.bytes:new Uint8Array(entry.bytes),crc=crc32(data),size=data.length,h=zipLocalHeader(nb,crc,size);chunks.push(h,data);central.push(zipCentralHeader(nb,crc,size,offset));offset+=h.length+size}const cdOffset=offset;let cdSize=0;for(const c of central){chunks.push(c);cdSize+=c.length}chunks.push(zipEnd(central.length,cdSize,cdOffset));return new Blob(chunks,{type:'application/zip'})}
   function zip64Value(extra,which){let pos=0;while(pos+4<=extra.length){const id=extra[pos]|(extra[pos+1]<<8),len=extra[pos+2]|(extra[pos+3]<<8),start=pos+4,end=start+len;if(end>extra.length)break;if(id===1){let q=start;for(const key of ['usize','csize','offset']){if(q+8>end)break;const dv=new DataView(extra.buffer,extra.byteOffset+q,8),v=dv.getUint32(0,true)+dv.getUint32(4,true)*4294967296;if(key===which)return v;q+=8}}pos=end}return null}
   async function parseZip(file){
-    // Read only the ZIP footer + central directory first. Audio data stays as
-    // lazy File slices instead of loading the entire preset into RAM.
     if(!file||typeof file.size!=='number')throw Error('Invalid backup file.');
-    const tailSize=Math.min(file.size,65557);
-    const tailStart=file.size-tailSize;
-    const tail=new Uint8Array(await file.slice(tailStart).arrayBuffer());
+    const tailSize=Math.min(file.size,131072),tailStart=file.size-tailSize,tail=new Uint8Array(await file.slice(tailStart).arrayBuffer());
     let eocd=-1;
-    for(let i=tail.length-22;i>=0;i--){if(tail[i]===0x50&&tail[i+1]===0x4b&&tail[i+2]===0x05&&tail[i+3]===0x06){eocd=i;break}}
-    if(eocd<0)throw Error('Not a Localify ZIP');
-    const eocdView=new DataView(tail.buffer,tail.byteOffset+eocd,22);
-    let count=eocdView.getUint16(10,true),cdSize=eocdView.getUint32(12,true),cdOffset=eocdView.getUint32(16,true);
+    for(let i=tail.length-22;i>=0;i--){if(tail[i]===0x50&&tail[i+1]===0x4b&&tail[i+2]===0x05&&tail[i+3]===0x06){const v=new DataView(tail.buffer,tail.byteOffset+i,22),comment=v.getUint16(20,true);if(i+22+comment<=tail.length){eocd=i;break}}}
+    if(eocd<0)throw Error('This ZIP preset is missing its directory. It may be an older or incomplete export.');
+    const ev=new DataView(tail.buffer,tail.byteOffset+eocd,22);let count=ev.getUint16(10,true),cdSize=ev.getUint32(12,true),cdOffset=ev.getUint32(16,true);
     if(count===0xffff||cdOffset===0xffffffff||cdSize===0xffffffff){
-      const locAbs=tailStart+eocd-20;
-      if(locAbs<0)throw Error('Invalid ZIP64 archive');
-      const locBuf=new Uint8Array(await file.slice(locAbs,locAbs+20).arrayBuffer());
-      if(locBuf.length<20||new DataView(locBuf.buffer,locBuf.byteOffset,20).getUint32(0,true)!==0x07064b50)throw Error('Invalid ZIP64 archive');
-      const ldv=new DataView(locBuf.buffer,locBuf.byteOffset,20),zip64Offset=ldv.getUint32(8,true)+ldv.getUint32(12,true)*4294967296;
-      const zBuf=new Uint8Array(await file.slice(zip64Offset,zip64Offset+56).arrayBuffer());
-      if(zBuf.length<56||new DataView(zBuf.buffer,zBuf.byteOffset,56).getUint32(0,true)!==0x06064b50)throw Error('Invalid ZIP64 archive');
-      const zdv=new DataView(zBuf.buffer,zBuf.byteOffset,56);
-      count=zdv.getUint32(32,true)+zdv.getUint32(36,true)*4294967296;
-      cdSize=zdv.getUint32(40,true)+zdv.getUint32(44,true)*4294967296;
-      cdOffset=zdv.getUint32(48,true)+zdv.getUint32(52,true)*4294967296;
+      const locAbs=tailStart+eocd-20;if(locAbs<0)throw Error('Invalid ZIP64 archive.');
+      const lb=new Uint8Array(await file.slice(locAbs,locAbs+20).arrayBuffer());if(lb.length<20||new DataView(lb.buffer).getUint32(0,true)!==0x07064b50)throw Error('Invalid ZIP64 archive.');
+      const lv=new DataView(lb.buffer),zo=lv.getUint32(8,true)+lv.getUint32(12,true)*4294967296,zb=new Uint8Array(await file.slice(zo,zo+56).arrayBuffer());
+      if(zb.length<56||new DataView(zb.buffer).getUint32(0,true)!==0x06064b50)throw Error('Invalid ZIP64 archive.');
+      const zv=new DataView(zb.buffer);count=zv.getUint32(32,true)+zv.getUint32(36,true)*4294967296;cdSize=zv.getUint32(40,true)+zv.getUint32(44,true)*4294967296;cdOffset=zv.getUint32(48,true)+zv.getUint32(52,true)*4294967296;
     }
-    if(count<0||cdSize<0||cdOffset<0||cdOffset+cdSize>file.size)throw Error('Invalid ZIP directory.');
-    const central=new Uint8Array(await file.slice(cdOffset,cdOffset+cdSize).arrayBuffer()),dv=new DataView(central.buffer,central.byteOffset,central.byteLength),dec=new TextDecoder();
-    const files=new Map();let pos=0;
-    for(let i=0;i<count;i++){
-      if(pos+46>central.length||dv.getUint32(pos,true)!==0x02014b50)throw Error('Invalid Localify entry');
-      const method=dv.getUint16(pos+10,true),crc=dv.getUint32(pos+16,true),c32=dv.getUint32(pos+20,true),u32v=dv.getUint32(pos+24,true),nameLen=dv.getUint16(pos+28,true),extraLen=dv.getUint16(pos+30,true),commentLen=dv.getUint16(pos+32,true),off32=dv.getUint32(pos+42,true);
-      const recordEnd=pos+46+nameLen+extraLen+commentLen;if(recordEnd>central.length)throw Error('Invalid Localify entry');
-      const name=dec.decode(central.slice(pos+46,pos+46+nameLen)),extra=central.slice(pos+46+nameLen,pos+46+nameLen+extraLen);
-      const usize=u32v===0xffffffff?zip64Value(extra,'usize'):u32v,csize=c32===0xffffffff?zip64Value(extra,'csize'):c32,localOffset=off32===0xffffffff?zip64Value(extra,'offset'):off32;
-      if(usize==null||csize==null||localOffset==null)throw Error('Invalid ZIP64 entry');
-      const lh=new Uint8Array(await file.slice(localOffset,localOffset+30).arrayBuffer());
-      if(lh.length<30||new DataView(lh.buffer,lh.byteOffset,30).getUint32(0,true)!==0x04034b50)throw Error('Invalid Localify entry');
-      const lhdv=new DataView(lh.buffer,lh.byteOffset,30),ln=lhdv.getUint16(26,true),le=lhdv.getUint16(28,true),dataStart=localOffset+30+ln+le;
-      if(dataStart<0||dataStart+csize>file.size)throw Error('Corrupt Localify entry: '+name);
-      if(files.has(name))throw Error('Corrupt Localify archive: duplicate entry '+name);
-      files.set(name,{blob:file.slice(dataStart,dataStart+csize),method,size:usize,crc:crc>>>0});
-      pos=recordEnd;
+    if(!Number.isSafeInteger(count)||count<1||count>1000000||!Number.isSafeInteger(cdSize)||cdSize<46||cdSize>file.size||!Number.isSafeInteger(cdOffset)||cdOffset<0)throw Error('Invalid ZIP directory.');
+    let cdStart=cdOffset,central=new Uint8Array(await file.slice(cdStart,Math.min(file.size,cdStart+cdSize)).arrayBuffer());
+    const sigAt=buf=>{for(let i=0;i+4<=buf.length;i++)if(buf[i]===0x50&&buf[i+1]===0x4b&&buf[i+2]===0x01&&buf[i+3]===0x02)return i;return -1};
+    if(sigAt(central)!==0){const ws=Math.max(0,cdOffset-1048576),we=Math.min(file.size,cdOffset+cdSize+1048576),win=new Uint8Array(await file.slice(ws,we).arrayBuffer()),found=sigAt(win);if(found<0)throw Error('Could not find the preset file list. This ZIP may use an unsupported or damaged format.');cdStart=ws+found;central=win.slice(found)}
+    const dv=new DataView(central.buffer,central.byteOffset,central.byteLength),dec=new TextDecoder(),files=new Map();let pos=0,read=0;
+    const readZip64=(extra,needs)=>{let q=0,vals={usize:null,csize:null,offset:null};while(q+4<=extra.length){const id=extra[q]|(extra[q+1]<<8),len=extra[q+2]|(extra[q+3]<<8),start=q+4,end=start+len;if(end>extra.length)break;if(id===1){let at=start;for(const key of needs){if(at+8>end)break;const x=new DataView(extra.buffer,extra.byteOffset+at,8);vals[key]=x.getUint32(0,true)+x.getUint32(4,true)*4294967296;at+=8}break}q=end}return vals};
+    while(read<count&&pos+46<=central.length&&dv.getUint32(pos,true)===0x02014b50){
+      const method=dv.getUint16(pos+10,true),crc=dv.getUint32(pos+16,true),c32=dv.getUint32(pos+20,true),u32v=dv.getUint32(pos+24,true),nameLen=dv.getUint16(pos+28,true),extraLen=dv.getUint16(pos+30,true),commentLen=dv.getUint16(pos+32,true),off32=dv.getUint32(pos+42,true),end=pos+46+nameLen+extraLen+commentLen;
+      if(end>central.length)throw Error('A preset directory entry is cut off. The file may be damaged.');
+      const name=dec.decode(central.slice(pos+46,pos+46+nameLen)),extra=central.slice(pos+46+nameLen,pos+46+nameLen+extraLen),needs=[];
+      if(u32v===0xffffffff)needs.push('usize');if(c32===0xffffffff)needs.push('csize');if(off32===0xffffffff)needs.push('offset');
+      const z=readZip64(extra,needs),usize=u32v===0xffffffff?z.usize:u32v,csize=c32===0xffffffff?z.csize:c32,rawOffset=off32===0xffffffff?z.offset:off32;
+      if(usize==null||csize==null||rawOffset==null||!Number.isSafeInteger(usize)||!Number.isSafeInteger(csize)||!Number.isSafeInteger(rawOffset))throw Error('Invalid ZIP64 entry: '+name);
+      const localOffset=rawOffset+(cdStart-cdOffset);if(localOffset<0||localOffset+30>file.size)throw Error('The preset contains an invalid file location: '+name);
+      const lh=new Uint8Array(await file.slice(localOffset,localOffset+30).arrayBuffer());if(lh.length<30||new DataView(lh.buffer).getUint32(0,true)!==0x04034b50)throw Error('Could not read preset file: '+name+'. Try exporting it again with a newer Localify version.');
+      const lv=new DataView(lh.buffer),dataStart=localOffset+30+lv.getUint16(26,true)+lv.getUint16(28,true);
+      if(dataStart+csize>file.size)throw Error('Preset file data is incomplete: '+name);if(files.has(name))throw Error('The preset contains duplicate files: '+name);
+      files.set(name,{blob:file.slice(dataStart,dataStart+csize),method,size:usize,crc:crc>>>0});pos=end;read++;
     }
+    if(!files.has('library.json'))throw Error('This ZIP does not contain a Localify preset manifest (library.json).');
     return files;
   }
   async function zipEntryBytes(entry){
@@ -5354,7 +5345,11 @@ async function renderSongWithEffectsWav(blob,eq){
       if(e instanceof SyntaxError)throw new Error('The Localify file is damaged or is not valid JSON.');
       throw e;
     }
-    if(!p||typeof p!=='object')throw new Error('Invalid Localify backup.');
+    if(!p||typeof p!=='object'||Array.isArray(p))throw new Error('Invalid Localify backup.');
+    if(!Array.isArray(p.tracks)&&Array.isArray(p.songs))p.tracks=p.songs;
+    if(!Array.isArray(p.playlists)&&Array.isArray(p.mixes))p.playlists=p.mixes;
+    if(!Array.isArray(p.artists)&&Array.isArray(p.artistList))p.artists=p.artistList;
+    if(!Array.isArray(p.albums)&&Array.isArray(p.albumList))p.albums=p.albumList;
     if(!Array.isArray(p.tracks)&&!Array.isArray(p.artists)&&!Array.isArray(p.albums)&&!Array.isArray(p.playlists)&&!p.settings)throw new Error('Invalid Localify backup: no supported library data was found.');
     p.presetKind=p.presetKind||'full';
     if(!['full','artists','albums','songs','playlists','liked','recent','settings'].includes(p.presetKind))throw new Error('Unsupported Localify backup type: '+String(p.presetKind)+'.');
@@ -5381,7 +5376,7 @@ async function renderSongWithEffectsWav(blob,eq){
   function findArtistImport(a){return state.artists.find(x=>presetKey(x.name)===presetKey(a.name))||null}
   function findAlbumImport(a,m){const ids=artistIdsForAlbum(a).map(id=>m.get(id)||id).filter(Boolean);return state.albums.find(x=>presetKey(x.title)===presetKey(a.title)&&artistIdsForAlbum(x).length===ids.length&&artistIdsForAlbum(x).every(id=>ids.includes(id)))||null}
   function findTrackImport(t,am,atm){const aid=t.albumId?am.get(t.albumId)||null:null,arts=artistIdsForTrack(t).map(id=>atm.get(id)||id).filter(Boolean);return state.tracks.find(x=>presetKey(x.title)===presetKey(t.title)&&(aid?x.albumId===aid:!x.albumId)&&artistIdsForTrack(x).length===arts.length&&artistIdsForTrack(x).every(id=>arts.includes(id)))||null}
-  async function importPresetData(p,files,mode){try{const kind=p.presetKind||'full',artists=Array.isArray(p.artists)?p.artists:[],albums=Array.isArray(p.albums)?p.albums:[],tracks=Array.isArray(p.tracks)?p.tracks:[],playlists=Array.isArray(p.playlists)?p.playlists:[];if(kind==='settings'){state.settings=mode==='set'?JSON.parse(JSON.stringify(p.settings||state.settings)):{...state.settings,...(p.settings||{})};applyEQ();await save(true);render();toast('Settings imported.');return}if(kind==='full'&&mode==='set'){if(p.exportSections){const s=p.exportSections;if(s.songs){for(const id of state.tracks.map(t=>t.id))queueBlobDelete(id);state.tracks=[];state.queue=[];state.queueIndex=-1;state.currentId=null}if(s.artists)state.artists=[];if(s.albums)state.albums=[];if(s.playlists)state.playlists=[];if(s.folders)state.folders=[];if(s.liked)state.liked=[];if(s.recent)state.recent=[]}else{for(const id of state.tracks.map(t=>t.id))queueBlobDelete(id);state.artists=[];state.albums=[];state.playlists=[];state.folders=[];state.liked=[];state.recent=[];state.tracks=[];state.queue=[];state.queueIndex=-1;state.currentId=null}}if(kind==='artists'&&mode==='set')state.artists=[];if(kind==='albums'&&mode==='set'){state.albums=[];for(const t of state.tracks){if(t.albumId&&!albums.some(a=>a.id===t.albumId)){t.albumId=null;t.album='Unknown Album'}}}if(kind==='songs'&&mode==='set'){for(const id of state.tracks.map(t=>t.id))queueBlobDelete(id);state.tracks=[];state.liked=[];state.recent=[];state.queue=[];state.queueIndex=-1;state.currentId=null}if(kind==='playlists'&&mode==='set')state.playlists=[];if(kind==='liked'&&mode==='set')state.liked=[];if(kind==='recent'&&mode==='set')state.recent=[];
+  async function importPresetData(p,files,mode){const rollback=structuredClone({tracks:state.tracks,albums:state.albums,artists:state.artists,playlists:state.playlists,folders:state.folders,liked:state.liked,recent:state.recent,queue:state.queue,queueIndex:state.queueIndex,currentId:state.currentId,settings:state.settings,analytics:state.analytics,selected:state.selected});const oldPendingIds=[...pendingBlobIds],oldPendingDeletes=[...pendingBlobDeletes],stagedBlobDeletes=[];try{const kind=p.presetKind||'full',artists=Array.isArray(p.artists)?p.artists:[],albums=Array.isArray(p.albums)?p.albums:[],tracks=Array.isArray(p.tracks)?p.tracks:[],playlists=Array.isArray(p.playlists)?p.playlists:[];if(kind==='settings'){state.settings=mode==='set'?JSON.parse(JSON.stringify(p.settings||state.settings)):{...state.settings,...(p.settings||{})};applyEQ();await save(true);render();toast('Settings imported.');return}if(kind==='full'&&mode==='set'){if(p.exportSections){const s=p.exportSections;if(s.songs){for(const id of state.tracks.map(t=>t.id))stagedBlobDeletes.push(id);state.tracks=[];state.queue=[];state.queueIndex=-1;state.currentId=null}if(s.artists)state.artists=[];if(s.albums)state.albums=[];if(s.playlists)state.playlists=[];if(s.folders)state.folders=[];if(s.liked)state.liked=[];if(s.recent)state.recent=[]}else{for(const id of state.tracks.map(t=>t.id))stagedBlobDeletes.push(id);state.artists=[];state.albums=[];state.playlists=[];state.folders=[];state.liked=[];state.recent=[];state.tracks=[];state.queue=[];state.queueIndex=-1;state.currentId=null}}if(kind==='artists'&&mode==='set')state.artists=[];if(kind==='albums'&&mode==='set'){state.albums=[];for(const t of state.tracks){if(t.albumId&&!albums.some(a=>a.id===t.albumId)){t.albumId=null;t.album='Unknown Album'}}}if(kind==='songs'&&mode==='set'){for(const id of state.tracks.map(t=>t.id))stagedBlobDeletes.push(id);state.tracks=[];state.liked=[];state.recent=[];state.queue=[];state.queueIndex=-1;state.currentId=null}if(kind==='playlists'&&mode==='set')state.playlists=[];if(kind==='liked'&&mode==='set')state.liked=[];if(kind==='recent'&&mode==='set')state.recent=[];
     const artistMap=new Map();
     for(const a0 of artists){
       const a=cloneEntity(a0);
@@ -5491,10 +5486,12 @@ async function renderSongWithEffectsWav(blob,eq){
     if(kind==='albums'&&mode==='set'){const valid=new Set(state.albums.map(a=>a.id));for(const t of state.tracks)if(t.albumId&&!valid.has(t.albumId)){t.albumId=null;t.album='Unknown Album'}}
     if(kind==='songs'&&mode==='set'){const valid=new Set(state.tracks.map(t=>t.id));state.playlists.forEach(pl=>pl.trackIds=(pl.trackIds||[]).filter(id=>valid.has(id)));state.liked=state.liked.filter(id=>valid.has(id));state.recent=state.recent.filter(id=>valid.has(id))}
     state.selected=[];
+    for(const id of stagedBlobDeletes)queueBlobDelete(id);
+    await save(false);await flushSave(false);
     const persisted=true;
     render();renderPlayer();
     toast(presetLabel(kind)+' preset '+(mode==='set'?'set':'added')+'.')
-  }catch(e){console.error('Localify backup import failed',e);toast(e?.message||'Could not import this Localify backup.')}}
+  }catch(e){Object.assign(state,rollback);pendingBlobIds=new Set(oldPendingIds);pendingBlobDeletes=new Set(oldPendingDeletes);dirtySave=true;try{await save(false);await flushSave(false)}catch(restoreError){console.error('Localify preset rollback save failed',restoreError)}console.error('Localify backup import failed',e);toast('Import failed. Your previous Localify library was restored. '+(e?.message||''))}}
   function publicShareCover(v){const s=typeof v==="string"?v:"";return /^(https?:\/\/)/i.test(s)?s:""}
 function buildPresetSharePayload(source=null){
  const x=source||state,artists=Array.isArray(x.artists)?x.artists:[],albums=Array.isArray(x.albums)?x.albums:[],tracks=Array.isArray(x.tracks)?x.tracks:[],folders=Array.isArray(x.folders)?x.folders:[],playlists=Array.isArray(x.playlists)?x.playlists:[];
