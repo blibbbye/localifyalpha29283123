@@ -3943,7 +3943,7 @@ function editLocalProfile(){
   }
   async function readAudioMetadata(file){
     try{
-      const bytes=new Uint8Array(await file.slice(0,512*1024).arrayBuffer());
+      const bytes=new Uint8Array(await readPresetBlobBuffer(file.slice(0,512*1024)));
       const ext=(file.name.match(/\.([a-z0-9]+)$/i)||[])[1]?.toLowerCase()||"";
       if(ext==="mp3"||file.type==="audio/mpeg"||(bytes[0]===73&&bytes[1]===68&&bytes[2]===51))return parseId3v2(bytes);
     }catch(e){console.warn("Localify metadata read failed",file?.name,e)}
@@ -4889,24 +4889,35 @@ async function renderSongWithEffectsWav(blob,eq){
 
   async function makeZip(entries){const chunks=[],central=[];let offset=0;const enc=new TextEncoder();for(const entry of entries){const nb=enc.encode(entry.name),data=entry.bytes instanceof Uint8Array?entry.bytes:new Uint8Array(entry.bytes),crc=crc32(data),size=data.length,h=zipLocalHeader(nb,crc,size);chunks.push(h,data);central.push(zipCentralHeader(nb,crc,size,offset));offset+=h.length+size}const cdOffset=offset;let cdSize=0;for(const c of central){chunks.push(c);cdSize+=c.length}chunks.push(zipEnd(central.length,cdSize,cdOffset));return new Blob(chunks,{type:'application/zip'})}
   function zip64Value(extra,which){let pos=0;while(pos+4<=extra.length){const id=extra[pos]|(extra[pos+1]<<8),len=extra[pos+2]|(extra[pos+3]<<8),start=pos+4,end=start+len;if(end>extra.length)break;if(id===1){let q=start;for(const key of ['usize','csize','offset']){if(q+8>end)break;const dv=new DataView(extra.buffer,extra.byteOffset+q,8),v=dv.getUint32(0,true)+dv.getUint32(4,true)*4294967296;if(key===which)return v;q+=8}}pos=end}return null}
+  async function readPresetBlobBuffer(blob){
+    try{return await blob.arrayBuffer()}catch(firstError){
+      return await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(reader.result);
+        reader.onerror=()=>reject(reader.error||firstError||new Error('The browser could not read this part of the selected preset.'));
+        reader.onabort=()=>reject(new Error('Reading the selected preset was cancelled.'));
+        try{reader.readAsArrayBuffer(blob)}catch(error){reject(error||firstError)}
+      });
+    }
+  }
   async function parseZip(file){
     if(!file||typeof file.size!=='number')throw Error('Invalid backup file.');
-    const tailSize=Math.min(file.size,131072),tailStart=file.size-tailSize,tail=new Uint8Array(await file.slice(tailStart).arrayBuffer());
+    const tailSize=Math.min(file.size,131072),tailStart=file.size-tailSize,tail=new Uint8Array(await readPresetBlobBuffer(file.slice(tailStart)));
     let eocd=-1;
     for(let i=tail.length-22;i>=0;i--){if(tail[i]===0x50&&tail[i+1]===0x4b&&tail[i+2]===0x05&&tail[i+3]===0x06){const v=new DataView(tail.buffer,tail.byteOffset+i,22),comment=v.getUint16(20,true);if(i+22+comment<=tail.length){eocd=i;break}}}
     if(eocd<0)throw Error('This ZIP preset is missing its directory. It may be an older or incomplete export.');
     const ev=new DataView(tail.buffer,tail.byteOffset+eocd,22);let count=ev.getUint16(10,true),cdSize=ev.getUint32(12,true),cdOffset=ev.getUint32(16,true);
     if(count===0xffff||cdOffset===0xffffffff||cdSize===0xffffffff){
       const locAbs=tailStart+eocd-20;if(locAbs<0)throw Error('Invalid ZIP64 archive.');
-      const lb=new Uint8Array(await file.slice(locAbs,locAbs+20).arrayBuffer());if(lb.length<20||new DataView(lb.buffer).getUint32(0,true)!==0x07064b50)throw Error('Invalid ZIP64 archive.');
-      const lv=new DataView(lb.buffer),zo=lv.getUint32(8,true)+lv.getUint32(12,true)*4294967296,zb=new Uint8Array(await file.slice(zo,zo+56).arrayBuffer());
+      const lb=new Uint8Array(await readPresetBlobBuffer(file.slice(locAbs,locAbs+20)));if(lb.length<20||new DataView(lb.buffer).getUint32(0,true)!==0x07064b50)throw Error('Invalid ZIP64 archive.');
+      const lv=new DataView(lb.buffer),zo=lv.getUint32(8,true)+lv.getUint32(12,true)*4294967296,zb=new Uint8Array(await readPresetBlobBuffer(file.slice(zo,zo+56)));
       if(zb.length<56||new DataView(zb.buffer).getUint32(0,true)!==0x06064b50)throw Error('Invalid ZIP64 archive.');
       const zv=new DataView(zb.buffer);count=zv.getUint32(32,true)+zv.getUint32(36,true)*4294967296;cdSize=zv.getUint32(40,true)+zv.getUint32(44,true)*4294967296;cdOffset=zv.getUint32(48,true)+zv.getUint32(52,true)*4294967296;
     }
     if(!Number.isSafeInteger(count)||count<1||count>1000000||!Number.isSafeInteger(cdSize)||cdSize<46||cdSize>file.size||!Number.isSafeInteger(cdOffset)||cdOffset<0)throw Error('Invalid ZIP directory.');
-    let cdStart=cdOffset,central=new Uint8Array(await file.slice(cdStart,Math.min(file.size,cdStart+cdSize)).arrayBuffer());
+    let cdStart=cdOffset,central=new Uint8Array(await readPresetBlobBuffer(file.slice(cdStart,Math.min(file.size,cdStart+cdSize))));
     const sigAt=buf=>{for(let i=0;i+4<=buf.length;i++)if(buf[i]===0x50&&buf[i+1]===0x4b&&buf[i+2]===0x01&&buf[i+3]===0x02)return i;return -1};
-    if(sigAt(central)!==0){const ws=Math.max(0,cdOffset-1048576),we=Math.min(file.size,cdOffset+cdSize+1048576),win=new Uint8Array(await file.slice(ws,we).arrayBuffer()),found=sigAt(win);if(found<0)throw Error('Could not find the preset file list. This ZIP may use an unsupported or damaged format.');cdStart=ws+found;central=win.slice(found)}
+    if(sigAt(central)!==0){const ws=Math.max(0,cdOffset-1048576),we=Math.min(file.size,cdOffset+cdSize+1048576),win=new Uint8Array(await readPresetBlobBuffer(file.slice(ws,we))),found=sigAt(win);if(found<0)throw Error('Could not find the preset file list. This ZIP may use an unsupported or damaged format.');cdStart=ws+found;central=win.slice(found)}
     const dv=new DataView(central.buffer,central.byteOffset,central.byteLength),dec=new TextDecoder(),files=new Map();let pos=0,read=0,skippedAudio=0;
     const readZip64=(extra,needs)=>{let q=0,vals={usize:null,csize:null,offset:null};while(q+4<=extra.length){const id=extra[q]|(extra[q+1]<<8),len=extra[q+2]|(extra[q+3]<<8),start=q+4,end=start+len;if(end>extra.length)break;if(id===1){let at=start;for(const key of needs){if(at+8>end)break;const x=new DataView(extra.buffer,extra.byteOffset+at,8);vals[key]=x.getUint32(0,true)+x.getUint32(4,true)*4294967296;at+=8}break}q=end}return vals};
     while(read<count&&pos+46<=central.length&&dv.getUint32(pos,true)===0x02014b50){
@@ -4918,7 +4929,7 @@ async function renderSongWithEffectsWav(blob,eq){
       if(usize==null||csize==null||rawOffset==null||!Number.isSafeInteger(usize)||!Number.isSafeInteger(csize)||!Number.isSafeInteger(rawOffset))throw Error('Invalid ZIP64 entry: '+name);
       const localOffset=rawOffset+(cdStart-cdOffset),isAudio=name.startsWith('audio/');
       if(localOffset<0||localOffset+30>file.size){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('The preset contains an invalid file location: '+name)}
-      const lh=new Uint8Array(await file.slice(localOffset,localOffset+30).arrayBuffer());if(lh.length<30||new DataView(lh.buffer).getUint32(0,true)!==0x04034b50){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('Could not read preset file: '+name+'. Try exporting it again with a newer Localify version.')}
+      const lh=new Uint8Array(await readPresetBlobBuffer(file.slice(localOffset,localOffset+30)));if(lh.length<30||new DataView(lh.buffer).getUint32(0,true)!==0x04034b50){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('Could not read preset file: '+name+'. Try exporting it again with a newer Localify version.')}
       const lv=new DataView(lh.buffer),dataStart=localOffset+30+lv.getUint16(26,true)+lv.getUint16(28,true);
       if(dataStart+csize>file.size){if(isAudio){skippedAudio++;pos=end;read++;continue}throw Error('Preset file data is incomplete: '+name)}if(files.has(name))throw Error('The preset contains duplicate files: '+name);
       files.set(name,{blob:file.slice(dataStart,dataStart+csize),method,size:usize,crc:crc>>>0});pos=end;read++;
@@ -4926,10 +4937,10 @@ async function renderSongWithEffectsWav(blob,eq){
     if(![...files.keys()].some(name=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')){
       // Older/crashed exports may have a usable first local entry even when
       // their central directory has lost or altered the manifest filename.
-      const first=new Uint8Array(await file.slice(0,30).arrayBuffer());
+      const first=new Uint8Array(await readPresetBlobBuffer(file.slice(0,30)));
       if(first.length>=30&&new DataView(first.buffer).getUint32(0,true)===0x04034b50){
         const h=new DataView(first.buffer),flags=h.getUint16(6,true),method=h.getUint16(8,true),crc=h.getUint32(14,true),csize=h.getUint32(18,true),usize=h.getUint32(22,true),nl=h.getUint16(26,true),el=h.getUint16(28,true);
-        const nameBytes=new Uint8Array(await file.slice(30,30+nl).arrayBuffer()),name=new TextDecoder().decode(nameBytes).replace(/\\\\/g,'/');
+        const nameBytes=new Uint8Array(await readPresetBlobBuffer(file.slice(30,30+nl))),name=new TextDecoder().decode(nameBytes).replace(/\\\\/g,'/');
         const dataStart=30+nl+el;
         if(name.split('/').pop()==='library.json'&&!(flags&8)&&csize>0&&dataStart+csize<=file.size&&!files.has(name)){
           files.set(name,{blob:file.slice(dataStart,dataStart+csize),method,size:usize,crc:crc>>>0});
@@ -4943,7 +4954,7 @@ async function renderSongWithEffectsWav(blob,eq){
   async function zipEntryBytes(entry){
     if(!entry)throw Error('Missing Localify archive entry.');
     let data;
-    if(entry.method===0){data=new Uint8Array(await entry.blob.arrayBuffer());}
+    if(entry.method===0){data=new Uint8Array(await readPresetBlobBuffer(entry.blob));}
     else if(entry.method===8&&'DecompressionStream' in window){const stream=entry.blob.stream().pipeThrough(new DecompressionStream('deflate-raw'));data=new Uint8Array(await new Response(stream).arrayBuffer());}
     else throw Error('Unsupported ZIP compression method.');
     if(data.length!==entry.size)throw Error('Corrupt Localify archive: size mismatch.');
@@ -5347,7 +5358,7 @@ async function renderSongWithEffectsWav(blob,eq){
     if(!file.size)throw new Error('The backup file is empty.');
     let p,files=null;
     try{
-      const head=new Uint8Array(await file.slice(0,4).arrayBuffer());
+      const head=new Uint8Array(await readPresetBlobBuffer(file.slice(0,4)));
       if(head[0]===0x50&&head[1]===0x4b&&head[2]===0x03&&head[3]===0x04){
         files=await parseZip(file);
         const mf=files.get('library.json')||[...files.entries()].find(([name])=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')?.[1];
@@ -5397,10 +5408,10 @@ async function renderSongWithEffectsWav(blob,eq){
       if(entry)manifest=JSON.parse(new TextDecoder().decode(await zipEntryBytes(entry)));
     }catch(e){zipError=e}
     if(!manifest){
-      const head=new Uint8Array(await file.slice(0,30).arrayBuffer());
+      const head=new Uint8Array(await readPresetBlobBuffer(file.slice(0,30)));
       if(head.length>=30&&new DataView(head.buffer).getUint32(0,true)===0x04034b50){
         const h=new DataView(head.buffer),flags=h.getUint16(6,true),method=h.getUint16(8,true),crc=h.getUint32(14,true),csize=h.getUint32(18,true),usize=h.getUint32(22,true),nl=h.getUint16(26,true),el=h.getUint16(28,true);
-        const name=new TextDecoder().decode(await file.slice(30,30+nl).arrayBuffer()).replace(/\\\\/g,'/'),start=30+nl+el;
+        const name=new TextDecoder().decode(await readPresetBlobBuffer(file.slice(30,30+nl))).replace(/\\\\/g,'/'),start=30+nl+el;
         if(name.split('/').pop()==='library.json'&&!(flags&8)&&csize>0&&start+csize<=file.size){
           manifest=JSON.parse(new TextDecoder().decode(await zipEntryBytes({blob:file.slice(start,start+csize),method,size:usize,crc:crc>>>0})));
         }
