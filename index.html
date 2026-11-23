@@ -5436,6 +5436,7 @@ async function renderSongWithEffectsWav(blob,eq){
   async function convertPresetToZipSkippingBroken(file){
     if(!file||!file.size)throw new Error('Choose a non-empty Localify preset.');
     if(!window.showSaveFilePicker)throw new Error('This recovery converter needs a Chromium-based browser with file saving support. Open Localify in Chrome, Edge or Brave.');
+    const handle=await window.showSaveFilePicker({suggestedName:file.name.replace(/\\.localify$/i,'')+'-recovered.zip',types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
     const files=await parseZip(file);
     const manifestEntry=files.get('library.json')||[...files.entries()].find(([name])=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')?.[1];
     if(!manifestEntry)throw new Error('The preset has no readable library.json file. The library information cannot be rebuilt.');
@@ -5468,7 +5469,6 @@ async function renderSongWithEffectsWav(blob,eq){
       }
     }
     const manifestBytes=new TextEncoder().encode(JSON.stringify(manifest));
-    const handle=await window.showSaveFilePicker({suggestedName:file.name.replace(/\\.localify$/i,'')+'-recovered.zip',types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
     const writable=await handle.createWritable({keepExistingData:false}),enc=new TextEncoder(),central=[];
     let offset=0,keptBytes=0;
     try{
