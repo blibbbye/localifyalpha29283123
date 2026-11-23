@@ -5432,6 +5432,66 @@ async function renderSongWithEffectsWav(blob,eq){
     input.value='';input.onchange=async()=>{const file=input.files?.[0];if(!file)return;try{await recoverPresetLocally(file)}catch(e){console.error(e);toast(e?.message||'Could not recover this preset.')}finally{input.value=''}};
     input.click();
   }
+
+  async function convertPresetToZipSkippingBroken(file){
+    if(!file||!file.size)throw new Error('Choose a non-empty Localify preset.');
+    if(!window.showSaveFilePicker)throw new Error('This recovery converter needs a Chromium-based browser with file saving support. Open Localify in Chrome, Edge or Brave.');
+    const files=await parseZip(file);
+    const manifestEntry=files.get('library.json')||[...files.entries()].find(([name])=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')?.[1];
+    if(!manifestEntry)throw new Error('The preset has no readable library.json file. The library information cannot be rebuilt.');
+    const manifestBytes=await zipEntryBytes(manifestEntry);
+    const manifest=JSON.parse(new TextDecoder().decode(manifestBytes));
+    const handle=await window.showSaveFilePicker({suggestedName:file.name.replace(/\\.localify$/i,'')+'-recovered.zip',types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
+    const writable=await handle.createWritable({keepExistingData:false}),enc=new TextEncoder(),central=[];
+    let offset=0,kept=0,skipped=0,keptBytes=0;
+    const write=async data=>writable.write(data);
+    const writeManifest=async()=>{
+      const name=enc.encode('library.json'),crc=crc32(manifestBytes),head=zipLocalHeader(name,crc,manifestBytes.length);
+      await write(head);await write(manifestBytes);central.push(zipCentralHeader(name,crc,manifestBytes.length,offset));
+      offset+=head.length+manifestBytes.length;keptBytes+=manifestBytes.length;
+    };
+    const checkCrc=async blob=>{
+      let state=0xffffffff,size=0;const reader=blob.stream().getReader();
+      try{while(true){const part=await reader.read();if(part.done)break;const b=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);state=crc32Update(state,b);size+=b.length;}}
+      finally{try{reader.releaseLock()}catch{}}
+      return {crc:(state^0xffffffff)>>>0,size};
+    };
+    try{
+      await writeManifest();
+      const entries=[...files.entries()].filter(([name])=>name!=='library.json');
+      for(let i=0;i<entries.length;i++){
+        const [name,entry]=entries[i];
+        if(!name||name.startsWith('/')||name.includes('..')||!entry?.blob){skipped++;continue;}
+        if(entry.method!==0){skipped++;continue;}
+        try{
+          const checked=await checkCrc(entry.blob);
+          if(checked.size!==entry.size||checked.crc!==(entry.crc>>>0)){skipped++;continue;}
+          const nameBytes=enc.encode(name),head=zipLocalHeaderStreaming(nameBytes,checked.size);
+          await write(head);
+          const reader=entry.blob.stream().getReader();let copied=0;
+          try{while(true){const part=await reader.read();if(part.done)break;const b=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);await write(b);copied+=b.length;}}
+          finally{try{reader.releaseLock()}catch{}}
+          if(copied!==checked.size)throw new Error('File changed while being copied');
+          await write(zipDataDescriptor64(checked.crc,checked.size));
+          central.push(zipCentralHeader(nameBytes,checked.crc,checked.size,offset,true));
+          offset+=head.length+checked.size+24;kept++;keptBytes+=checked.size;
+          toast('Repairing ZIP… '+kept+' files kept, '+skipped+' skipped');
+        }catch(err){skipped++;console.warn('Skipped damaged preset entry:',name,err);}
+      }
+      const centralOffset=offset,parts=central,total=parts.reduce((n,p)=>n+p.length,0),cd=new Uint8Array(total);
+      let at=0;for(const p of parts){cd.set(p,at);at+=p.length;}
+      await write(cd);await write(zipEnd(central.length,total,centralOffset));await writable.close();
+      setModal('<div class="modalHead"><h2>ZIP recovery finished</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">'+uiIcon('close')+'</button></div><div class="creditsBox"><strong>'+kept+' files recovered · '+skipped+' files skipped</strong><div class="subtle">'+formatBytes(keptBytes)+' written. The original preset was not changed.</div></div><div class="help">The recovered ZIP contains library.json and every file that passed its size and checksum checks. Try importing the ZIP into Localify. Keep the original preset as a backup.</div>');
+      $('#closeModal').onclick=()=>closeModal(true);
+      toast('Recovered ZIP saved.');
+    }catch(e){try{await writable.abort()}catch{}throw e;}
+  }
+  function openPresetZipConverter(){
+    const input=$('#recoverPresetPicker');if(!input){toast('Preset converter is unavailable.');return}
+    input.value='';input.onchange=async()=>{const file=input.files?.[0];if(!file)return;try{toast('Checking preset files…');await convertPresetToZipSkippingBroken(file)}catch(e){console.error(e);toast(e?.message||'Could not convert this preset.')}finally{input.value=''}};
+    input.click();
+  }
+
   function openPresetImportMode(p,files){pendingPresetImport={p,files};const kind=presetLabel(p.presetKind),setText=({full:'Replace your entire Localify library.',artists:'Delete every artist and replace the artist list with this file.',albums:'Delete every album and replace the album list with this file.',songs:'Delete every song and replace the song list with this file.',playlists:'Delete every playlist and replace the playlist list with this file.',liked:'Replace your liked songs list with this file.',recent:'Replace your recently played list with this file.',settings:'Replace your Localify settings with this file.'})[p.presetKind]||'Replace the data represented by this file.',summary=(p.presetKind==='full'?[['artists',p.artists?.length||0],['albums',p.albums?.length||0],['folders',p.folders?.length||0],['playlists',p.playlists?.length||0]]:[['artists',p.artists?.length||0],['albums',p.albums?.length||0],['folders',p.folders?.length||0],['playlists',p.playlists?.length||0],['songs',p.tracks?.length||0]]).filter(x=>x[1]).map(x=>`${x[1]} ${x[0]}`).join(' • ')||'Settings preset';setModal(`<div class="modalHead"><h2>Import ${esc(kind)}</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">${uiIcon('close')}</button></div><div class="creditsBox" style="margin-top:0"><strong>${esc(p.presetName||kind)}</strong><div class="subtle">${esc(summary)}</div></div><div class="help" style="margin-top:12px">Choose how to import this Localify file.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px"><button class="primary" id="presetAdd">Add file</button><button class="dangerBtn" id="presetSet">Set file</button></div>`);$('#closeModal').onclick=()=>{pendingPresetImport=null;closeModal(true)};$('#presetAdd').onclick=async()=>{const x=pendingPresetImport;pendingPresetImport=null;closeModal(true);await importPresetData(x.p,x.files,'add')};$('#presetSet').onclick=async()=>{const x=pendingPresetImport;pendingPresetImport=null;closeModal(true);if(confirm(`Set ${kind}? This will replace the existing ${kind.toLowerCase()} data in Localify.`))await importPresetData(x.p,x.files,'set')}}
   async function importPresetFile(file,expectedKind=''){try{const x=await readPresetFile(file);if(expectedKind&&x.p.presetKind!==expectedKind)throw Error(`This file is not an ${presetLabel(expectedKind)} preset.`);openPresetImportMode(x.p,x.files)}catch(e){console.error(e);toast(e?.message||'Could not read that Localify backup.')}finally{pendingExpectedPresetKind='';$('#bundlePicker').value=''}}
   function findArtistImport(a){return state.artists.find(x=>presetKey(x.name)===presetKey(a.name))||null}
@@ -5834,6 +5894,7 @@ function openPresetsMenu(){
           "<button class=\"presetAction\" id=\"presetExportBtn\"><span class=\"presetActionIcon\">"+uiIcon("download")+"</span><span><strong>Export preset</strong><span>Export ur library into a preset</span></span></button>"+
           "<button class=\"presetAction\" id=\"presetImportBtn\"><span class=\"presetActionIcon\">"+uiIcon("upload")+"</span><span><strong>Import preset</strong><span>Load a Localify file onto this device</span></span></button>"+
           "<button class=\"presetAction\" id=\"presetRecoverBtn\"><span class=\"presetActionIcon\">"+uiIcon("refresh-cw")+"</span><span><strong>Recover broken preset</strong><span>Check a preset export that crashed</span></span></button>"+
+          "<button class=\"presetAction\" id=\"presetZipRepairBtn\"><span class=\"presetActionIcon\">"+uiIcon("archive")+"</span><span><strong>Convert preset to ZIP</strong><span>Skip broken files and save the readable ones</span></span></button>"+
         "</div>"+
         "<div class=\"presetQuickTitle\">Quick tools</div>"+
         "<div class=\"presetQuickGrid\">"+
@@ -5848,6 +5909,7 @@ function openPresetsMenu(){
     $("#presetExportBtn").onclick=()=>{closeModal(true);openPresetExportChooser()};
     $("#presetImportBtn").onclick=()=>{closeModal(true);pickPresetFile()};
     $("#presetRecoverBtn").onclick=()=>{closeModal(true);openPresetRecovery()};
+    $("#presetZipRepairBtn").onclick=()=>{closeModal(true);openPresetZipConverter()};
     $("#presetExportArtistsBtn").onclick=()=>{closeModal(true);openPresetExportSelection("artists")};
     $("#presetImportArtistsBtn").onclick=()=>{closeModal(true);pickPresetFile("artists")};
     $("#presetExportAlbumsBtn").onclick=()=>{closeModal(true);openPresetExportSelection("albums")};
