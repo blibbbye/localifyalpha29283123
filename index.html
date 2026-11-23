@@ -5218,11 +5218,11 @@ async function renderSongWithEffectsWav(blob,eq){
       const mn=enc.encode("library.json"),mb=enc.encode(JSON.stringify(manifest)),mc=crc32(mb);
       const mh=zipLocalHeader(mn,mc,mb.length);
       await writeWithRetry(mh);await writeWithRetry(mb);
-      central.push(zipCentralHeader(mn,mc,mb.length,offset));
-      offset+=mh.length+mb.length;
-      const cdOffset=offset,centralData=joinParts(central);
+      const manifestCentral=zipCentralHeader(mn,mc,mb.length,offset);
+      const finalCentral=central.concat([manifestCentral]);
+      const cdOffset=offset+mh.length+mb.length,centralData=joinParts(finalCentral);
       await writeWithRetry(centralData);
-      await writeWithRetry(zipEnd(central.length,centralData.length,cdOffset));
+      await writeWithRetry(zipEnd(finalCentral.length,centralData.length,cdOffset));
       await closeWithRetry();
     };
     try{
