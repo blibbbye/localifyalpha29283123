@@ -5439,51 +5439,60 @@ async function renderSongWithEffectsWav(blob,eq){
     const files=await parseZip(file);
     const manifestEntry=files.get('library.json')||[...files.entries()].find(([name])=>name.replace(/\\\\/g,'/').split('/').pop()==='library.json')?.[1];
     if(!manifestEntry)throw new Error('The preset has no readable library.json file. The library information cannot be rebuilt.');
-    const manifestBytes=await zipEntryBytes(manifestEntry);
-    const manifest=JSON.parse(new TextDecoder().decode(manifestBytes));
-    const handle=await window.showSaveFilePicker({suggestedName:file.name.replace(/\\.localify$/i,'')+'-recovered.zip',types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
-    const writable=await handle.createWritable({keepExistingData:false}),enc=new TextEncoder(),central=[];
-    let offset=0,kept=0,skipped=0,keptBytes=0;
-    const write=async data=>writable.write(data);
-    const writeManifest=async()=>{
-      const name=enc.encode('library.json'),crc=crc32(manifestBytes),head=zipLocalHeader(name,crc,manifestBytes.length);
-      await write(head);await write(manifestBytes);central.push(zipCentralHeader(name,crc,manifestBytes.length,offset));
-      offset+=head.length+manifestBytes.length;keptBytes+=manifestBytes.length;
-    };
+    const manifest=JSON.parse(new TextDecoder().decode(await zipEntryBytes(manifestEntry)));
     const checkCrc=async blob=>{
       let state=0xffffffff,size=0;const reader=blob.stream().getReader();
       try{while(true){const part=await reader.read();if(part.done)break;const b=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);state=crc32Update(state,b);size+=b.length;}}
       finally{try{reader.releaseLock()}catch{}}
       return {crc:(state^0xffffffff)>>>0,size};
     };
-    try{
-      await writeManifest();
-      const entries=[...files.entries()].filter(([name])=>name!=='library.json');
-      for(let i=0;i<entries.length;i++){
-        const [name,entry]=entries[i];
-        if(!name||name.startsWith('/')||name.includes('..')||!entry?.blob){skipped++;continue;}
-        if(entry.method!==0){skipped++;continue;}
-        try{
-          const checked=await checkCrc(entry.blob);
-          if(checked.size!==entry.size||checked.crc!==(entry.crc>>>0)){skipped++;continue;}
-          const nameBytes=enc.encode(name),head=zipLocalHeaderStreaming(nameBytes,checked.size);
-          await write(head);
-          const reader=entry.blob.stream().getReader();let copied=0;
-          try{while(true){const part=await reader.read();if(part.done)break;const b=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);await write(b);copied+=b.length;}}
-          finally{try{reader.releaseLock()}catch{}}
-          if(copied!==checked.size)throw new Error('File changed while being copied');
-          await write(zipDataDescriptor64(checked.crc,checked.size));
-          central.push(zipCentralHeader(nameBytes,checked.crc,checked.size,offset,true));
-          offset+=head.length+checked.size+24;kept++;keptBytes+=checked.size;
-          toast('Repairing ZIP… '+kept+' files kept, '+skipped+' skipped');
-        }catch(err){skipped++;console.warn('Skipped damaged preset entry:',name,err);}
+    const candidates=[...files.entries()].filter(([name])=>name!=='library.json'),valid=[];
+    let skipped=files.skippedAudioEntries||0;
+    for(let i=0;i<candidates.length;i++){
+      const [name,entry]=candidates[i];
+      if(!name||name.startsWith('/')||name.includes('..')||!entry?.blob||entry.method!==0){skipped++;continue;}
+      try{
+        const checked=await checkCrc(entry.blob);
+        if(checked.size!==entry.size||checked.crc!==(entry.crc>>>0)){skipped++;continue;}
+        valid.push({name,blob:entry.blob,size:checked.size,crc:checked.crc});
+      }catch(err){skipped++;console.warn('Skipped unreadable preset entry:',name,err);}
+      if((i+1)%5===0)toast('Checking preset… '+valid.length+' readable, '+skipped+' skipped');
+    }
+    const validNames=new Set(valid.map(x=>x.name));
+    let tracksMadeUnavailable=0;
+    if(Array.isArray(manifest.tracks)){
+      for(const track of manifest.tracks){
+        if(track?.audioFile&&!validNames.has(track.audioFile)){
+          track.audioFile=null;track.hasAudio=false;track.audioSize=0;tracksMadeUnavailable++;
+        }
       }
-      const centralOffset=offset,parts=central,total=parts.reduce((n,p)=>n+p.length,0),cd=new Uint8Array(total);
-      let at=0;for(const p of parts){cd.set(p,at);at+=p.length;}
-      await write(cd);await write(zipEnd(central.length,total,centralOffset));await writable.close();
-      setModal('<div class="modalHead"><h2>ZIP recovery finished</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">'+uiIcon('close')+'</button></div><div class="creditsBox"><strong>'+kept+' files recovered · '+skipped+' files skipped</strong><div class="subtle">'+formatBytes(keptBytes)+' written. The original preset was not changed.</div></div><div class="help">The recovered ZIP contains library.json and every file that passed its size and checksum checks. Try importing the ZIP into Localify. Keep the original preset as a backup.</div>');
-      $('#closeModal').onclick=()=>closeModal(true);
-      toast('Recovered ZIP saved.');
+    }
+    const manifestBytes=new TextEncoder().encode(JSON.stringify(manifest));
+    const handle=await window.showSaveFilePicker({suggestedName:file.name.replace(/\\.localify$/i,'')+'-recovered.zip',types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
+    const writable=await handle.createWritable({keepExistingData:false}),enc=new TextEncoder(),central=[];
+    let offset=0,keptBytes=0;
+    try{
+      const manifestName=enc.encode('library.json'),manifestCrc=crc32(manifestBytes),manifestHead=zipLocalHeader(manifestName,manifestCrc,manifestBytes.length);
+      await writable.write(manifestHead);await writable.write(manifestBytes);
+      central.push(zipCentralHeader(manifestName,manifestCrc,manifestBytes.length,offset));
+      offset+=manifestHead.length+manifestBytes.length;keptBytes+=manifestBytes.length;
+      for(let i=0;i<valid.length;i++){
+        const entry=valid[i],nameBytes=enc.encode(entry.name),head=zipLocalHeaderStreaming(nameBytes,entry.size);
+        await writable.write(head);
+        const reader=entry.blob.stream().getReader();let copied=0;
+        try{while(true){const part=await reader.read();if(part.done)break;const b=part.value instanceof Uint8Array?part.value:new Uint8Array(part.value);await writable.write(b);copied+=b.length;}}
+        finally{try{reader.releaseLock()}catch{}}
+        if(copied!==entry.size)throw new Error('A file changed while the ZIP was being written: '+entry.name);
+        await writable.write(zipDataDescriptor64(entry.crc,entry.size));
+        central.push(zipCentralHeader(nameBytes,entry.crc,entry.size,offset,true));
+        offset+=head.length+entry.size+24;keptBytes+=entry.size;
+        if((i+1)%3===0||i===valid.length-1)toast('Building ZIP… '+(i+1)+'/'+valid.length+' files • '+formatBytes(keptBytes));
+      }
+      const centralOffset=offset,total=central.reduce((n,p)=>n+p.length,0),cd=new Uint8Array(total);
+      let at=0;for(const part of central){cd.set(part,at);at+=part.length;}
+      await writable.write(cd);await writable.write(zipEnd(central.length,total,centralOffset));await writable.close();
+      setModal('<div class="modalHead"><h2>ZIP recovery finished</h2><button class="circle iconOnly" id="closeModal" title="Close" aria-label="Close">'+uiIcon('close')+'</button></div><div class="creditsBox"><strong>'+valid.length+' files recovered · '+skipped+' files skipped</strong><div class="subtle">'+formatBytes(keptBytes)+' written · '+tracksMadeUnavailable+' songs marked as missing audio.</div></div><div class="help">The recovered ZIP contains the readable library information and every file that passed its size and checksum checks. Songs with damaged or missing audio keep their metadata and can still be imported. Try importing the ZIP into Localify. Your original preset was not changed.</div>');
+      $('#closeModal').onclick=()=>closeModal(true);toast('Recovered ZIP saved.');
     }catch(e){try{await writable.abort()}catch{}throw e;}
   }
   function openPresetZipConverter(){
