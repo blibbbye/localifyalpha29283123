@@ -5530,7 +5530,7 @@ async function renderSongWithEffectsWav(blob,eq){
           const check=await crcBlob(blob);
           let expected=crc;
           if(flags&8){const dd=await read(dataEnd,dataEnd+24);if(dd.length!==24||new DataView(dd.buffer).getUint32(0,true)!==0x08074b50){skipped++;i++;continue;}const ddv=new DataView(dd.buffer);expected=ddv.getUint32(4,true);if(u64(ddv,8)!==size||u64(ddv,16)!==size){skipped++;i++;continue;}}
-          if(check.size!==size||check.crc!==(expected>>>0)){skipped++;i++;continue;}
+          if(check.size!==size||check.crc!==(expected>>>0)){skipped++;offset=dataEnd+descriptor;scanned=offset;advanced=true;break;}
           validHeaders++;
           if(isManifest&&!manifest){const bytes=await read(dataStart,dataEnd);try{const parsed=JSON.parse(dec.decode(bytes));if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))manifest=parsed;}catch{}}
           else if(isAudio&&!foundAudio.has(name))foundAudio.set(name,{name,blob,size,crc:check.crc});
