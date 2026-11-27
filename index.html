@@ -938,6 +938,32 @@ body.theme-gradient .customThemeEditor input[type=text]{background:var(--theme-i
 .catalogCleanupGroup{padding:12px;border:1px solid var(--line);border-radius:12px;margin:10px 0}
 .catalogCleanupGroup h3{margin:0 0 7px;font-size:14px}
 .catalogCleanupActions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+
+/* Icon-only button correction: undo the shared text-button SVG spacing rule. */
+button.iconOnly .svgIcon,
+button.iconOnlyAction .svgIcon,
+button.infoBtn .svgIcon,
+button.iconOnlyCreate .svgIcon,
+button.circle .svgIcon{
+  display:block!important;
+  width:18px!important;
+  height:18px!important;
+  margin:0!important;
+  padding:0!important;
+  vertical-align:initial!important;
+  flex:0 0 18px!important;
+}
+button.iconOnly,
+button.iconOnlyAction,
+button.infoBtn,
+button.iconOnlyCreate,
+button.circle{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  padding:0!important;
+  line-height:0!important;
+}
 </style></head>
 <body>
 <div class="app">
