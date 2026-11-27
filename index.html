@@ -732,9 +732,7 @@ main{min-width:0;min-height:0}
     .localifyDraggable:active{cursor:grabbing!important}
     .localifyDragging{opacity:.38}
     .localifyDragOver{outline:2px solid rgba(125,211,252,.78);outline-offset:-2px;background-color:rgba(125,211,252,.08)!important}
-  /* Keep symbol buttons geometrically centered regardless of glyph size. */
-    button:has(.svgIcon){display:inline-flex;align-items:center;justify-content:center;gap:8px}
-    button.iconOnly,button.iconOnlyAction,.ctrl,.circle{display:inline-flex;align-items:center;justify-content:center}
+  /* Global button centering rule removed; alignment is handled by each button class. */
   </style>
 <style id="exportImageStyles">.exportImagePreview{max-height:68vh;overflow:auto;border:1px solid #252e38;border-radius:16px;background:#090d11;padding:10px}.exportImagePreview img{display:block;width:100%;height:auto;border-radius:10px}#downloadExportImage{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:7px}</style>  <style id="localifyViewModes">
     .viewModeBar{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #252c35;border-radius:11px;background:#101419;flex:none}
