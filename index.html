@@ -968,7 +968,7 @@ button.circle{
 .artist-select-box input:checked{background:#334553!important;border-color:#557184!important}
 .artist-select-box input:checked::after{border-color:#c8e8f7!important}
 .albumMetaLine{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.albumInfoInline{width:25px!important;height:25px!important;min-width:25px!important;flex:0 0 25px!important;margin-left:auto!important;border-radius:50%!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;line-height:0!important}
+.albumInfoInline{width:23px!important;height:23px!important;min-width:23px!important;flex:0 0 23px!important;margin-left:4px!important;border-radius:50%!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;line-height:0!important}
 .albumInfoInline .svgIcon{width:14px!important;height:14px!important;flex:0 0 14px!important;margin:0!important}
 .folderDetailActions{display:flex;align-items:center;gap:8px;flex-wrap:nowrap!important;width:auto}
 .folderDetailActions .folderIconAction{width:38px;height:38px;min-width:38px;flex:0 0 38px;padding:0!important;display:inline-flex!important;align-items:center;justify-content:center;line-height:0!important}
@@ -986,6 +986,19 @@ button.circle{
  .deleteLibraryBtn .deleteLibraryText:after{content:"Delete library";font-size:11px}
  .folderDetailActions{flex-wrap:wrap!important}
  .folderDetailActions .folderDeleteAction{margin-left:auto}
+}
+
+/* Compact destructive/import actions on narrow screens without affecting desktop layout. */
+@media(max-width:760px){
+ .entityActions .responsiveIconAction,
+ .presetActionGrid .presetAction,
+ .presetQuickGrid button,
+ .folderDetailActions .folderIconAction{min-width:38px}
+ .entityActions .responsiveIconAction{width:38px;height:38px;padding:0!important;display:inline-flex!important;align-items:center;justify-content:center;line-height:0;font-size:0}
+ .entityActions .responsiveIconAction .svgIcon{width:17px;height:17px;margin:0!important;display:block}
+ .presetActionGrid .presetAction,.presetQuickGrid button{position:relative}
+ .presetActionGrid .presetAction strong,.presetActionGrid .presetAction span:not(.presetActionIcon),
+ .presetQuickGrid button>span{display:none}
 }
 </style></head>
 <body>
@@ -1864,7 +1877,26 @@ button.circle{
     return restored;
   }
 
-  function setView(v){state.currentView=v;state.selected=[];state.detail=null;localifyClearPages();if(v==="profile"){showProfile();$("#main").scrollTop=0;return}if(v==="listeningStats"){showListeningStats();$("#main").scrollTop=0;return}if(v==="accountSettings"){showAccountSettings();$("#main").scrollTop=0;return}render();$("#main").scrollTop=0}
+
+  function localifySetHash(route){
+    const next="#"+String(route||"home").replace(/^#/,"");
+    if(location.hash!==next)history.pushState(null,"",next);
+  }
+  function localifyApplyHash(){
+    const raw=decodeURIComponent((location.hash||"#home").slice(1));
+    const [kind,...rest]=raw.split("/");
+    const id=rest.join("/");
+    if(kind==="album"&&id&&albumById(id)){showAlbum(id);return}
+    if(kind==="artist"&&id&&artistById(id)){showArtist(id);return}
+    if(kind==="folder"&&id&&folderById(id)){showFolder(id);return}
+    const valid=["home","search","library","albums","folders","artists","playlists","liked","recent","profile","listeningStats","accountSettings"];
+    const view=valid.includes(kind)?kind:"home";
+    state.currentView=view;state.detail=null;state.selected=[];render();
+  }
+  window.addEventListener("hashchange",localifyApplyHash);
+  window.addEventListener("popstate",localifyApplyHash);
+
+  function setView(v){localifySetHash(v);state.currentView=v;state.selected=[];state.detail=null;localifyClearPages();if(v==="profile"){showProfile();$("#main").scrollTop=0;return}if(v==="listeningStats"){showListeningStats();$("#main").scrollTop=0;return}if(v==="accountSettings"){showAccountSettings();$("#main").scrollTop=0;return}render();$("#main").scrollTop=0}
   function empty(title,desc){return `<div class="empty"><h3>${esc(title)}</h3><div>${esc(desc)}</div></div>`}
   function renderNav(){
     $$("#nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===state.currentView));
@@ -2031,7 +2063,7 @@ button.circle{
   }
   function showFolder(id){
     const f=folderById(id);if(!f)return;
-    state.currentView="folders";state.detail={type:"folder",id};state.selected=[];renderNav();
+    localifySetHash("folder/"+encodeURIComponent(id));state.currentView="folders";state.detail={type:"folder",id};state.selected=[];renderNav();
     const items=folderItems(f),albums=items.filter(x=>x.type==="album"),songs=items.filter(x=>x.type==="song"),artists=items.filter(x=>x.type==="artist"),playlists=items.filter(x=>x.type==="playlist");
     let html='<div class="sectionHead"><div><h2 class="viewTitle">'+esc(f.name)+'</h2><div class="subtle">'+items.length+' items</div></div><div class="sectionHeadActions folderDetailActions"><button class="secondary folderIconAction" id="folderDownload" title="Download folder" aria-label="Download folder">'+uiIcon("download")+'</button><button class="secondary folderIconAction" id="folderEdit" title="Edit folder" aria-label="Edit folder">'+uiIcon("edit")+'</button><button class="primary folderIconAction" id="folderAddItems" title="Add items" aria-label="Add items">'+uiIcon("plus")+'</button><button class="dangerBtn folderIconAction folderDeleteAction" id="folderDelete" title="Delete folder" aria-label="Delete folder">'+uiIcon("trash")+'</button></div></div>';
     if(albums.length)html+='<div class="section"><div class="sectionHead"><h2>Albums</h2><span>'+albums.length+'</span></div><div class="grid folderAlbumOrder">'+albums.map(x=>albumCard(albumById(x.id))).join("")+'</div></div>';
@@ -2327,10 +2359,10 @@ button.circle{
 
   function showAlbum(id,keepDetail=false){
     __prepareLocalifyDerived();
-    const a=albumById(id);if(!a)return; state.detail={type:"album",id};
+    const a=albumById(id);if(!a)return; localifySetHash("album/"+encodeURIComponent(id));state.detail={type:"album",id};
     const tracks=sortAlbumTracks(__localifyCatalog().byAlbum.get(id)||[]);
     const artistNames=artistNamesForAlbum(a);
-    $("#content").innerHTML=`<div class="profileHero"><div class="profileArt">${coverForAlbum(a,a.cover)?`<img class="localifyCoverImage" src="${esc(coverForAlbum(a,a.cover))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:fallbackArt("album")}</div><div><h2 class="viewTitle">${esc(a.title)}</h2><div class="subtle">${artistLinksForAlbumHtml(a)||"Unknown Artist"} • ${tracks.length} songs • ${durationLabel(tracks)}${a.year?` • ${esc(a.year)}`:""}</div><div class="metaLine albumMetaLine">${a.genre?`<span class="metaPill">${esc(a.genre)}</span>`:""}${a.label?`<span class="metaPill">${esc(a.label)}</span>`:""}<button class="secondary infoBtn albumInfoInline" id="albumInfo" title="Album credits" aria-label="Album credits">${uiIcon("info")}</button></div><div class="entityActions"><button class="primary" id="albumPlay">${uiIcon("play")} Play</button><button class="secondary iconOnlyAction" id="albumAdd" title="Add songs" aria-label="Add songs">${uiIcon("plus")}</button><button class="secondary iconOnlyAction" id="albumEdit" title="Edit album" aria-label="Edit album">${uiIcon("edit")}</button><button class="dangerBtn" id="albumDelete">${uiIcon("trash")} Delete album</button></div></div></div>${a.description?`<div class="subtle">${esc(a.description)}</div>`:""}${tracks.length?`<div class="section"><div class="tableWrap">${trackTable(tracks,true,"album:"+id,"track",true)}</div></div>`:empty("Album is empty","Add songs to this album. New tracks inherit the album artist, cover and credits by default.")}`;
+    $("#content").innerHTML=`<div class="profileHero"><div class="profileArt">${coverForAlbum(a,a.cover)?`<img class="localifyCoverImage" src="${esc(coverForAlbum(a,a.cover))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:fallbackArt("album")}</div><div><h2 class="viewTitle">${esc(a.title)}</h2><div class="subtle">${artistLinksForAlbumHtml(a)||"Unknown Artist"} • ${tracks.length} songs • ${durationLabel(tracks)}${a.year?` • ${esc(a.year)}`:""}</div><div class="metaLine albumMetaLine">${a.genre?`<span class="metaPill">${esc(a.genre)}</span>`:""}${a.label?`<span class="metaPill">${esc(a.label)}</span>`:""}<button class="secondary infoBtn albumInfoInline" id="albumInfo" title="Album credits" aria-label="Album credits">${uiIcon("info")}</button></div><div class="entityActions"><button class="primary" id="albumPlay">${uiIcon("play")} Play</button><button class="secondary iconOnlyAction" id="albumAdd" title="Add songs" aria-label="Add songs">${uiIcon("plus")}</button><button class="secondary iconOnlyAction" id="albumEdit" title="Edit album" aria-label="Edit album">${uiIcon("edit")}</button><button class="dangerBtn iconOnlyAction responsiveIconAction" id="albumDelete" title="Delete album" aria-label="Delete album">${uiIcon("trash")}</button></div></div></div>${a.description?`<div class="subtle">${esc(a.description)}</div>`:""}${tracks.length?`<div class="section"><div class="tableWrap">${trackTable(tracks,true,"album:"+id,"track",true)}</div></div>`:empty("Album is empty","Add songs to this album. New tracks inherit the album artist, cover and credits by default.")}`;
     $("#albumPlay").onclick=()=>playQueue(tracks,0);
     $("#albumAdd").onclick=()=>pickFiles({albumId:id});
     $("#albumEdit").onclick=()=>editAlbum(id);
@@ -2342,7 +2374,7 @@ button.circle{
 
   function showArtist(id,keepDetail=false){
     __prepareLocalifyDerived();
-    const a=artistById(id);if(!a)return; state.detail={type:"artist",id}; const tracks=__localifyCatalog().byArtist.get(id)||[]; const albums=state.albums.filter(x=>artistIdsForAlbum(x).includes(id));
+    const a=artistById(id);if(!a)return; localifySetHash("artist/"+encodeURIComponent(id));state.detail={type:"artist",id}; const tracks=__localifyCatalog().byArtist.get(id)||[]; const albums=state.albums.filter(x=>artistIdsForAlbum(x).includes(id));
     $("#content").innerHTML=`<div class="profileHero"><div class="profileArt artist">${a.image?`<img class="localifyCoverImage" src="${esc(a.image)}" alt="">`:fallbackArt("artist")}</div><div><h2 class="viewTitle">${esc(a.name)}</h2><div class="subtle">${tracks.length} songs • ${albums.length} albums</div><div class="metaLine">${(a.genres||[]).map(g=>`<span class="metaPill">${esc(g)}</span>`).join("")}${a.label?`<span class="metaPill">${esc(a.label)}</span>`:""}</div><div class="entityActions"><button class="primary" id="artistPlay">${uiIcon("play")} Play</button><button class="secondary iconOnlyAction" id="artistEdit" title="Edit artist" aria-label="Edit artist">${uiIcon("edit")}</button><button class="secondary iconOnlyAction" id="artistAdd" title="Add songs" aria-label="Add songs">${uiIcon("plus")}</button><button class="secondary" id="artistAlbum">${uiIcon("plus")} Create album</button></div></div></div>${a.bio?`<div class="subtle">${esc(a.bio)}</div>`:""}${a.website?`<div class="subtle" style="margin-top:7px">${esc(a.website)}</div>`:""}<div class="section"><div class="sectionHead"><h2>Albums</h2><span>${albums.length}</span></div>${albums.length?'<div class="grid">'+albums.map(albumCard).join("")+'</div>':empty("No albums yet","Create an album for this artist.")}</div><div class="section"><div class="sectionHead"><h2>Songs</h2><span>${tracks.length}</span></div>${tracks.length?`<div class="tableWrap">${trackTable(tracks)}</div>`:empty("No songs yet","Add songs to this artist.")}</div>`;
     $("#artistPlay").onclick=()=>playQueue(tracks,0);$("#artistEdit").onclick=()=>editArtist(id);$("#artistAdd").onclick=()=>pickFiles({artistId:id});$("#artistAlbum").onclick=()=>editAlbum(null,{artistIds:[id]});bindTrackTable();bindAlbumCards();
     applyContextArtworkTheme();
