@@ -6023,7 +6023,7 @@ function submitGlobalSearch(){
       }
     }
     renderProfileTopButton();
-    render();
+    if(location.hash)localifyApplyHash();else render();
     const managedVisibilitySync=()=>{if(document.visibilityState==="visible"&&state.libraryFolderHandle)scanManagedLibraryFolder({silent:true})};
     document.addEventListener("visibilitychange",managedVisibilitySync);
     setInterval(()=>{if(document.visibilityState==="visible"&&state.libraryFolderHandle)scanManagedLibraryFolder({silent:true})},20000);
